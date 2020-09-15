@@ -11,12 +11,14 @@ import (
 var GeneratedMagicStr = xid.New().String()
 var ipsMutex = &sync.Mutex{}
 var knownWcMutex = &sync.Mutex{}
+var counter = 0
 
 type goWCModel struct {
 	ipsCache      map[string][]string
 	knownWcResult map[string][]string
 	nsRecord      []string
 	domainsQueue  []string
+	resolveQueue  map[string]bool
 }
 
 func (m *goWCModel) init() {
@@ -24,6 +26,7 @@ func (m *goWCModel) init() {
 	m.knownWcResult = make(map[string][]string)
 	m.nsRecord = make([]string, 0)
 	m.domainsQueue = make([]string, 0)
+	m.resolveQueue = make(map[string]bool, 0)
 }
 
 func (m *goWCModel) popDomain() (string, error) {
@@ -39,14 +42,19 @@ func (m *goWCModel) popDomain() (string, error) {
 func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
 	toBeResolved := false
 	ipsMutex.Lock()
-	if _, ok := m.ipsCache[domain]; ok != true {
-		toBeResolved = true
+	if _, flag1 := m.ipsCache[domain]; flag1 != true {
+		if _, flag2 := m.resolveQueue[domain]; flag2 != true {
+			toBeResolved = true
+			m.resolveQueue[domain] = true
+		}
 	}
 	ipsMutex.Unlock()
 	if toBeResolved {
-		ips := dnsMachine.getARecords(domain)
-		ips = append(ips, dnsMachine.getCNAMERecords(domain)...)
+		ips := dnsMachine.query(domain, "A")
+		ips = append(ips, dnsMachine.query(domain, "CNAME")...)
 		addQueue(&m.ipsCache, domain, ips, ipsMutex)
+		delete(m.resolveQueue, domain)
+
 	}
 
 	return m.ipsCache[domain]

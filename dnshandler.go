@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"sync"
 
 	miekgdns "github.com/miekg/dns"
 	retryabledns "github.com/projectdiscovery/retryabledns"
@@ -66,34 +67,50 @@ func (d *DNSFactory) fastCNAMERecords(domain string) ([]string, error) {
 	return results, nil
 }
 
-func (d *DNSFactory) getNSRecords(domain string) []string {
+func (d *DNSFactory) query(domain string, queryType string) []string {
 	var results []string
-	var tmp []string
-	for _, resolver := range d.Resolvers {
-		tmp, _ = getNSRecordWithCustomNS(domain, validateNSFmt(resolver))
-		results = append(results, tmp...)
-	}
-	return RemoveDuplicates(results)
-}
+	resultsChannel := make(chan []string, len(d.Resolvers))
+	var wg sync.WaitGroup
+	wg.Add(len(d.Resolvers))
 
-func (d *DNSFactory) getARecords(domain string) []string {
-	var results []string
-	var tmp []string
-	for _, resolver := range d.Resolvers {
-		tmp, _ = getARecordWithCustomNS(domain, validateNSFmt(resolver))
-		results = append(results, tmp...)
-	}
-	return RemoveDuplicates(results)
-}
+	switch queryType {
+	case "NS":
+		for _, resolver := range d.Resolvers {
+			go func(domain, resolver string) {
+				defer wg.Done()
+				var tmp []string
+				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "NS")
+				resultsChannel <- tmp
+			}(domain, resolver)
+		}
+	case "A":
+		for _, resolver := range d.Resolvers {
+			go func(domain, resolver string) {
+				defer wg.Done()
+				var tmp []string
+				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "A")
+				resultsChannel <- tmp
+			}(domain, resolver)
+		}
 
-func (d *DNSFactory) getCNAMERecords(domain string) []string {
-	var results []string
-	var tmp []string
-	for _, resolver := range d.Resolvers {
-		tmp, _ = getCNAMERecordWithCustomNS(domain, validateNSFmt(resolver))
-		results = append(results, tmp...)
+	case "CNAME":
+		for _, resolver := range d.Resolvers {
+			go func(domain, resolver string) {
+				defer wg.Done()
+				var tmp []string
+				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "CNAME")
+				resultsChannel <- tmp
+			}(domain, resolver)
+		}
+
+	}
+	wg.Wait()
+	close(resultsChannel)
+	for r := range resultsChannel {
+		results = append(results, r...)
 	}
 	return RemoveDuplicates(results)
+
 }
 
 func makeQueryHeader(domain, resolver string, queryType uint16) (*miekgdns.Msg, error) {
@@ -123,44 +140,34 @@ func makeQueryHeader(domain, resolver string, queryType uint16) (*miekgdns.Msg, 
 	return answer, err
 }
 
-func getNSRecordWithCustomNS(domain string, resolver string) ([]string, error) {
+func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error) {
 	var result []string
-	answer, err := makeQueryHeader(domain, resolver, miekgdns.TypeNS)
-	if err != nil {
-		return result, err
+	typeMap := map[string]uint16{
+		"A":     miekgdns.TypeA,
+		"NS":    miekgdns.TypeNS,
+		"CNAME": miekgdns.TypeCNAME,
 	}
-	for _, record := range answer.Answer {
-		if t, ok := record.(*miekgdns.NS); ok {
-			result = append(result, NSparse(t.String()))
-		}
-	}
-	return result, err
-}
 
-func getARecordWithCustomNS(domain string, resolver string) ([]string, error) {
-	var result []string
-	answer, err := makeQueryHeader(domain, resolver, miekgdns.TypeA)
+	answer, err := makeQueryHeader(domain, resolver, typeMap[queryType])
 	if err != nil {
 		return result, err
 	}
 	for _, record := range answer.Answer {
-		if t, ok := record.(*miekgdns.A); ok {
-			result = append(result, t.A.String())
+		switch queryType {
+		case "NS":
+			if t, ok := record.(*miekgdns.NS); ok {
+				result = append(result, NSparse(t.String()))
+			}
+		case "A":
+			if t, ok := record.(*miekgdns.A); ok {
+				result = append(result, t.A.String())
+			}
+		case "CNAME":
+			if t, ok := record.(*miekgdns.CNAME); ok {
+				result = append(result, CNAMEparse(t.String()))
+			}
 		}
 	}
-	return result, err
-}
 
-func getCNAMERecordWithCustomNS(domain string, resolver string) ([]string, error) {
-	var result []string
-	answer, err := makeQueryHeader(domain, resolver, miekgdns.TypeCNAME)
-	if err != nil {
-		return result, err
-	}
-	for _, record := range answer.Answer {
-		if t, ok := record.(*miekgdns.CNAME); ok {
-			result = append(result, CNAMEparse(t.String()))
-		}
-	}
 	return result, err
 }
