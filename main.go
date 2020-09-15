@@ -1,139 +1,102 @@
 package main
 
 import (
-	"errors"
 	"log"
-	"strings"
 	"sync"
-
-	"github.com/miekg/dns"
-	miekgdns "github.com/miekg/dns"
-	retryabledns "github.com/projectdiscovery/retryabledns"
 )
 
-// DNSFactory is structure to perform dns lookups
-type DNSFactory struct {
-	dnsClient *retryabledns.Client
-}
-
-type Options struct {
-	BaseResolvers []string
-	MaxRetries    int
-}
-
-var DefaultOptions = Options{
-	BaseResolvers: []string{"8.8.8.8:53", "8.8.4.4:53", "1.1.1.1:53", "1.0.0.1:53"},
-	MaxRetries:    3,
-}
-
-func InitDNSFactory(options *Options) (*DNSFactory, error) {
-	dnsClient := retryabledns.New(options.BaseResolvers, options.MaxRetries)
-	return &DNSFactory{dnsClient: dnsClient}, nil
-}
-
-func (d *DNSFactory) getNSRecords(domain string) ([]string, error) {
-	var results []string
-	tmpResults, _, err := d.dnsClient.ResolveRaw(domain, miekgdns.TypeNS)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range tmpResults {
-		NSans := strings.Split(value, "NS")
-		tmp := NSans[len(NSans)-1]
-		tmp = strings.TrimSpace(strings.TrimSuffix(tmp, "."))
-		results = append(results, tmp)
-	}
-	return results, nil
-}
-
-func (d *DNSFactory) getARecords(domain string) ([]string, error) {
-	var results []string
-	tmpResults, err := d.dnsClient.Resolve(domain)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range tmpResults.IPs {
-		results = append(results, value)
-	}
-	return results, nil
-}
-
-func getARecordWithCustomNS(domain string, resolver string, AnswerPool chan []string, wg *sync.WaitGroup) ([]string, error) {
-	var result []string
-	msg := new(miekgdns.Msg)
+func dnsWoker(domain string, resolver string, AnswerPool chan []string, wg *sync.WaitGroup) {
 	defer wg.Done()
-
-	msg.Id = miekgdns.Id()
-	msg.RecursionDesired = true
-	msg.Question = make([]miekgdns.Question, 1)
-	msg.Question[0] = miekgdns.Question{
-		Name:   miekgdns.Fqdn(domain),
-		Qtype:  miekgdns.TypeA,
-		Qclass: miekgdns.ClassINET,
-	}
-
-	var err error
-	var answer *miekgdns.Msg
-
-	answer, err = dns.Exchange(msg, resolver)
-	if err != nil {
-		AnswerPool <- result
-		return result, err
-	}
-
-	// In case we got some error from the server, return.
-	if answer != nil && answer.Rcode != miekgdns.RcodeSuccess {
-		AnswerPool <- result
-		return result, errors.New(miekgdns.RcodeToString[answer.Rcode])
-	}
-
-	for _, record := range answer.Answer {
-		if t, ok := record.(*miekgdns.A); ok {
-			result = append(result, t.A.String())
-		}
-	}
-
+	result, _ := getARecordWithCustomNS(domain, resolver)
 	AnswerPool <- result
-	return result, err
 }
 
-func main() {
+func test() {
+	gWC := &goWCModel{
+		ipsCache: make(map[string][]string),
+	}
+	a := []string{"acdcd", "dafdfasdf"}
+	gWC.ipsCache["test"] = a
+	log.Println(gWC)
 
+}
+
+func test2() {
 	var NSans []string
+	options := &Options{
+		BaseResolvers: DefaultOptions.BaseResolvers,
+		MaxRetries:    DefaultOptions.MaxRetries,
+	}
+	hostname := "viettel.vn"
 
-	var wg sync.WaitGroup
+	dnsMachineNormal, err := InitDNSFactory(options)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	NSans = dnsMachineNormal.getNSRecords(hostname)
+	log.Println(NSans)
+
+	dnsMachineOrigin, _ := InitDNSFactory(&Options{BaseResolvers: NSans})
+
+	log.Println(dnsMachineOrigin.getARecords("abmetrix.viettel.vn"))
+
+}
+
+func test3() {
+	gWC := &goWCModel{}
+	gWC.init()
+	processMassdnsCache("/tmp/ohdns.W5uy9chX/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
+	log.Println(gWC.domainsQueue)
+	log.Println(gWC.ipsCache)
+	d, _ := gWC.popDomain()
+	log.Println(gWC.domainsQueue)
 
 	options := &Options{
 		BaseResolvers: DefaultOptions.BaseResolvers,
 		MaxRetries:    DefaultOptions.MaxRetries,
 	}
-	hostname := "spotify.com"
+	dnsMachine, _ := InitDNSFactory(options)
+	log.Println(dnsMachine.getCNAMERecords("360-security-antivirus-free.it.prod.cloud.netflix.com"))
+	log.Println(dnsMachine.getCNAMERecords("abmetrix.netflix.com"))
+	log.Println(dnsMachine.getCNAMERecords("wwccssfscs.netflix.com"))
 
-	dnsMachine, err := InitDNSFactory(options)
+	log.Println(gWC.resolve(d, dnsMachine))
 
-	if err != nil {
-		log.Fatal(err)
+}
+
+func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
+	ips := gWC.resolve(domain, dnsMachine)
+	if len(ips) == 0 {
+		return false
 	}
 
-	NSans, err = dnsMachine.getNSRecords(hostname)
-
-	if err != nil {
-		log.Fatal(err)
+	if gWC.ipIsWildcard(domain, ips[0]) {
+		return true
 	}
 
-	AnswerPool := make(chan []string, len(NSans))
-	for _, value := range NSans {
-		wg.Add(1)
-		log.Println(value)
-		go getARecordWithCustomNS("test151562262245.spotify.com", value+":53", AnswerPool, &wg)
+	parentDomain := getParentDomain(domain)
+	tmpDomain := GeneratedMagicStr + "." + parentDomain
+	tmpDomainIps := gWC.resolve(tmpDomain, dnsMachine)
+
+	if stringInSlice(ips[0], tmpDomainIps) {
+		rootDomainCheck := gWC.getRootOfWildcard(domain, dnsMachine)
+		for _, Ip := range tmpDomainIps {
+			addQueue(&gWC.knownWcResult, Ip, []string{rootDomainCheck}, knownWcMutex)
+		}
+		return true
 	}
 
-	wg.Wait()
-	close(AnswerPool)
+	return false
+}
 
-	for rs := range AnswerPool {
-		log.Println(rs)
-	}
+func main() {
+	//test()
+	//test2()
+	//concurrency := 30
+
+	test3()
 
 	log.Println("Exited")
 
