@@ -5,67 +5,6 @@ import (
 	"sync"
 )
 
-func dnsWoker(domain string, resolver string, AnswerPool chan []string, wg *sync.WaitGroup) {
-	defer wg.Done()
-	result, _ := getARecordWithCustomNS(domain, resolver)
-	AnswerPool <- result
-}
-
-func test() {
-	gWC := &goWCModel{
-		ipsCache: make(map[string][]string),
-	}
-	a := []string{"acdcd", "dafdfasdf"}
-	gWC.ipsCache["test"] = a
-	log.Println(gWC)
-
-}
-
-func test2() {
-	var NSans []string
-	options := &Options{
-		BaseResolvers: DefaultOptions.BaseResolvers,
-		MaxRetries:    DefaultOptions.MaxRetries,
-	}
-	hostname := "viettel.vn"
-
-	dnsMachineNormal, err := InitDNSFactory(options)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	NSans = dnsMachineNormal.getNSRecords(hostname)
-	log.Println(NSans)
-
-	dnsMachineOrigin, _ := InitDNSFactory(&Options{BaseResolvers: NSans})
-
-	log.Println(dnsMachineOrigin.getARecords("abmetrix.viettel.vn"))
-
-}
-
-func test3() {
-	gWC := &goWCModel{}
-	gWC.init()
-	processMassdnsCache("/tmp/ohdns.W5uy9chX/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
-	log.Println(gWC.domainsQueue)
-	log.Println(gWC.ipsCache)
-	d, _ := gWC.popDomain()
-	log.Println(gWC.domainsQueue)
-
-	options := &Options{
-		BaseResolvers: DefaultOptions.BaseResolvers,
-		MaxRetries:    DefaultOptions.MaxRetries,
-	}
-	dnsMachine, _ := InitDNSFactory(options)
-	log.Println(dnsMachine.getCNAMERecords("360-security-antivirus-free.it.prod.cloud.netflix.com"))
-	log.Println(dnsMachine.getCNAMERecords("abmetrix.netflix.com"))
-	log.Println(dnsMachine.getCNAMERecords("wwccssfscs.netflix.com"))
-
-	log.Println(gWC.resolve(d, dnsMachine))
-
-}
-
 func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
 	ips := gWC.resolve(domain, dnsMachine)
 	if len(ips) == 0 {
@@ -81,9 +20,10 @@ func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
 	tmpDomainIps := gWC.resolve(tmpDomain, dnsMachine)
 
 	if stringInSlice(ips[0], tmpDomainIps) {
+		log.Println("WC: " + domain)
 		rootDomainCheck := gWC.getRootOfWildcard(domain, dnsMachine)
-		for _, Ip := range tmpDomainIps {
-			addQueue(&gWC.knownWcResult, Ip, []string{rootDomainCheck}, knownWcMutex)
+		for _, IP := range tmpDomainIps {
+			addQueue(&gWC.knownWcResult, IP, []string{rootDomainCheck}, knownWcMutex)
 		}
 		return true
 	}
@@ -91,13 +31,66 @@ func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
 	return false
 }
 
+func worker(gWC *goWCModel, dnsMachine *DNSFactory, wg *sync.WaitGroup) {
+	var domain string
+	var err error
+	err = nil
+	defer wg.Done()
+
+	for err == nil {
+		domain, err = gWC.popDomain()
+		if domain != "" {
+			processDomain(domain, gWC, dnsMachine)
+		}
+	}
+	log.Println(err)
+}
+
+func printResult(gWC *goWCModel) {
+	domains := gWC.getRootDomains()
+	log.Println(domains)
+	for _, value := range domains {
+		log.Println(value)
+	}
+
+}
+
 func main() {
-	//test()
-	//test2()
-	//concurrency := 30
 
-	test3()
+	concurrency := 1
+	var NSans []string
+	options := &Options{
+		BaseResolvers: DefaultOptions.BaseResolvers,
+		MaxRetries:    DefaultOptions.MaxRetries,
+	}
+	dnsMachineNormal, err := InitDNSFactory(options)
 
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	hostname := "netflix.com"
+	NSans = dnsMachineNormal.getNSRecords(hostname)
+
+	dnsMachineOrigin, _ := InitDNSFactory(&Options{BaseResolvers: NSans})
+
+	gWC := &goWCModel{}
+	gWC.init()
+
+	processMassdnsCache("/tmp/ohdns.2bHLRD5j/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
+	//processMassdnsCache("/tmp/ohdns.W5uy9chX/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
+	//processMassdnsCache("/tmp/ohdns.fVBykYYS/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
+
+	log.Println("Process Massdns cache...")
+
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		worker(gWC, dnsMachineOrigin, &wg)
+	}
+
+	wg.Wait()
+	printResult(gWC)
 	log.Println("Exited")
 
 }

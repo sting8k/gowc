@@ -39,12 +39,13 @@ func (m *goWCModel) popDomain() (string, error) {
 func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
 	toBeResolved := false
 	ipsMutex.Lock()
-	if _, ok := m.ipsCache[domain]; ok {
+	if _, ok := m.ipsCache[domain]; ok != true {
 		toBeResolved = true
 	}
 	ipsMutex.Unlock()
 	if toBeResolved {
 		ips := dnsMachine.getARecords(domain)
+		ips = append(ips, dnsMachine.getCNAMERecords(domain)...)
 		addQueue(&m.ipsCache, domain, ips, ipsMutex)
 	}
 
@@ -55,8 +56,8 @@ func (m *goWCModel) ipIsWildcard(domain, ip string) bool {
 	defer knownWcMutex.Unlock()
 	knownWcMutex.Lock()
 	if _, ok := m.knownWcResult[ip]; ok {
-		for wcIp, _ := range m.knownWcResult {
-			for _, rootDomainGot := range m.knownWcResult[wcIp] {
+		for wcIP := range m.knownWcResult {
+			for _, rootDomainGot := range m.knownWcResult[wcIP] {
 				if strings.HasSuffix(domain, "."+rootDomainGot) {
 					return true
 				}
@@ -84,7 +85,7 @@ func (m *goWCModel) getRootOfWildcard(domain string, dnsMachine *DNSFactory) str
 	tmpRoot := ""
 	domainPieces := strings.Split(domain, ".")
 	root := domain
-	for i := len(domainPieces) - 1; i >= 0; i-- {
+	for i := len(domainPieces) - 1; i > 0; i-- {
 		tmpRoot = strings.Join(domainPieces[i-1:len(domainPieces)], ".")
 		if m.IsRootOf(domain, tmpRoot, dnsMachine) {
 			break
@@ -94,6 +95,16 @@ func (m *goWCModel) getRootOfWildcard(domain string, dnsMachine *DNSFactory) str
 	return root
 }
 
+func (m *goWCModel) getRootDomains() map[string]bool {
+	rootDomains := make(map[string]bool)
+	for ip := range m.knownWcResult {
+		for _, domain := range m.knownWcResult[ip] {
+			rootDomains[domain] = true
+		}
+	}
+	return rootDomains
+}
+
 func getParentDomain(s string) string {
 	return strings.Join(strings.Split(s, ".")[1:], ".")
 }
@@ -101,6 +112,9 @@ func getParentDomain(s string) string {
 func addQueue(q *map[string][]string, key string, values []string, mutex *sync.Mutex) {
 	defer mutex.Unlock()
 	mutex.Lock()
+	if _, ok := (*q)[key]; ok != true {
+		(*q)[key] = []string{}
+	}
 	for _, value := range values {
 		if stringInSlice(value, (*q)[key]) != true {
 			(*q)[key] = append((*q)[key], value)

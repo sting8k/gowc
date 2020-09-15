@@ -11,7 +11,7 @@ func processMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[stri
 	var tmpDomain, tmpIP string
 	domains, _ := readLines(path) // x.y.z A 22.52.25.25
 
-	for _, domain := range domains[:10] {
+	for _, domain := range domains {
 		pieces := strings.Split(domain, " ")
 		if len(pieces) != 3 {
 			continue
