@@ -76,6 +76,8 @@ func getNSOfTarget(domain string) []string {
 		BaseResolvers: DefaultOptions.BaseResolvers,
 		MaxRetries:    DefaultOptions.MaxRetries,
 	}
+	Resolvers := DefaultOptions.BaseResolvers
+
 	dnsMachineNormal, err := InitDNSFactory(options)
 
 	if err != nil {
@@ -83,12 +85,11 @@ func getNSOfTarget(domain string) []string {
 	}
 
 	NSans = dnsMachineNormal.query(domain, "NS")
-	if len(NSans) == 0 {
-		log.Println("Cannot get any origin NS")
-		NSans = DefaultOptions.BaseResolvers
+	if len(NSans) != 0 {
+		Resolvers = append(Resolvers, NSans...)
 	}
 
-	return NSans
+	return Resolvers
 }
 
 func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
@@ -119,6 +120,7 @@ func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
 func worker(gWC *goWCModel, dnsMachine *DNSFactory, wg *sync.WaitGroup) {
 	var domain string
 	var err error
+
 	err = nil
 	defer wg.Done()
 
@@ -175,7 +177,7 @@ func main() {
 	//Processing
 	fmt.Println("Processing MassDns cache file ...")
 	processMassdnsCache(args.MassdnsCache, &gWC.domainsQueue, &gWC.ipsCache)
-
+	fmt.Printf("%d subdomains to be checked!\n", len(gWC.domainsQueue))
 	fmt.Println("Invoke threads to clean Wildcards ...")
 	var wg sync.WaitGroup
 	wg.Add(concurrency)

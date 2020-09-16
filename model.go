@@ -56,8 +56,9 @@ func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
 		ips = append(ips, dnsMachine.query(domain, "CNAME")...)
 		addQueue(&m.ipsCache, domain, ips, ipsMutex)
 		delete(m.resolveQueue, domain)
+
 	} else {
-		ok := true
+		_, ok := m.resolveQueue[domain]
 		for ok {
 			ok = m.resolveQueue[domain]
 			time.Sleep(50 * time.Millisecond)
