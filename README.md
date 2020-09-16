@@ -10,7 +10,7 @@ go get gitlab.com/prawps/gowc
 go build main.go
 ```
 
-Or use the pre-built binary 
+Or use the [pre-built binary](https://gitlab.com/prawps/gowc/uploads/18ef15aff8bc3ac0b2bfed7c0f0539d5/goWC)
 
 ## Usage
 
