@@ -4,11 +4,9 @@ import (
 	"errors"
 
 	miekgdns "github.com/miekg/dns"
-	retryabledns "github.com/projectdiscovery/retryabledns"
 )
 
 type DNSFactory struct {
-	dnsClient *retryabledns.Client
 	Resolvers []string
 }
 
@@ -23,47 +21,7 @@ var DefaultOptions = Options{
 }
 
 func InitDNSFactory(options *Options) (*DNSFactory, error) {
-	dnsClient := retryabledns.New(options.BaseResolvers, options.MaxRetries)
-	return &DNSFactory{dnsClient: dnsClient, Resolvers: options.BaseResolvers}, nil
-}
-
-func (d *DNSFactory) fastNSRecords(domain string) ([]string, error) {
-	var results []string
-	tmpResults, _, err := d.dnsClient.ResolveRaw(domain, miekgdns.TypeNS)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range tmpResults {
-		NSans := NSparse(value)
-		results = append(results, NSans)
-	}
-	return results, nil
-}
-
-func (d *DNSFactory) fastARecords(domain string) ([]string, error) {
-	var results []string
-	tmpResults, err := d.dnsClient.Resolve(domain)
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range tmpResults.IPs {
-		results = append(results, value)
-	}
-	return results, nil
-}
-
-func (d *DNSFactory) fastCNAMERecords(domain string) ([]string, error) {
-	var results []string
-	tmpResults, _, err := d.dnsClient.ResolveRaw(domain, miekgdns.TypeCNAME)
-
-	if err != nil {
-		return nil, err
-	}
-	for _, value := range tmpResults {
-		Cans := CNAMEparse(value)
-		results = append(results, Cans)
-	}
-	return results, nil
+	return &DNSFactory{Resolvers: options.BaseResolvers}, nil
 }
 
 func (d *DNSFactory) query(domain string, queryType string) []string {

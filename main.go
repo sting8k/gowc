@@ -134,7 +134,7 @@ func argsParse() *GoWcArgs {
 	args := &GoWcArgs{}
 	flag.StringVar(&args.MassdnsCache, "m", "", "Massdns output file")
 	flag.StringVar(&args.Domain, "d", "", "Massdns output file")
-	flag.IntVar(&args.Threads, "t", 20, "Threads")
+	flag.IntVar(&args.Threads, "t", 10, "Threads")
 	flag.StringVar(&args.Output, "o", "output.txt", "Output file")
 	flag.BoolVar(&args.WithIp, "i", false, "Output with ips from massdns")
 	flag.Parse()

@@ -14,14 +14,14 @@ Or use the [pre-built binary](https://gitlab.com/prawps/gowc/uploads/18ef15aff8b
 
 ## Usage
 
-For normal output:
+For normal output, use `1 - 10` threads is safe enough:
 ```
-gowc -d <target.com> -m <massdnsOutput> -t 20 -o <output>
+gowc -d <target.com> -m <massdnsOutput> -t 10 -o <output>
 ```
 
 For output with ips of domains:
 ```
-gowc -d <target.com> -m <massdnsOutput> -t 20 -o <output> -i
+gowc -d <target.com> -m <massdnsOutput> -t 10 -o <output> -i
 ```
 
 
