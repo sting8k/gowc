@@ -1,5 +1,5 @@
 ## GoWC
-A fast & accurate tool to clean *Wildcard from massdns output file.
+A fast & accurate tool to clean *Wildcards* from *massdns output file*.
 This is not a wrapper. A wrapper will have massdns's parameters fixed inside, what is not recommended. Massdns should be used in flexible way.
 Generally, it is based on [puredns](https://github.com/d3mondev/puredns), but there are few changes to make the algorithm better and faster.
 
