@@ -1,36 +1,72 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
-	"strconv"
+	"sort"
+	"strings"
 	"sync"
 )
 
-func printResult(gWC *goWCModel) {
-	domains := gWC.getRootDomains()
-	log.Println(domains)
-	for _, value := range domains {
-		log.Println(value)
-	}
-	log.Println("Resolve Queries: " + strconv.Itoa(counter))
-
+type GoWcArgs struct {
+	MassdnsCache string
+	Domain       string
+	Threads      int
+	Output       string
+	WithIp       bool
 }
 
-func saveRootWildcardDomains(gWC *goWCModel, path string) {
-	domains := gWC.getRootDomains()
-	var output []string
-	for d := range domains {
-		output = append(output, d)
-	}
-	writeLines(output, path)
-}
-
-func saveIpsWildcard(gWC *goWCModel, path string) {
+func craftOutput(gWC *goWCModel) map[string][]string {
+	output := make(map[string][]string)
+	tmpRootDomains := gWC.getRootDomains()
 	ips := gWC.knownWcResult
-	var output []string
-	for ip := range ips {
-		output = append(output, ip)
+	var flag int
+	var ok bool
+
+	rootDomains := []string{}
+	rootIps := []string{}
+
+	for r := range tmpRootDomains {
+		rootDomains = append(rootDomains, r)
 	}
+
+	for ip := range ips {
+		rootIps = append(rootIps, ip)
+	}
+
+	for domain := range gWC.ipsCache {
+		for _, rD := range rootDomains {
+			if strings.Contains(domain, rD) && domain != rD {
+				for _, rI := range rootIps {
+					ok, flag = stringInSliceWithIndex(rI, gWC.ipsCache[domain])
+					if ok {
+						gWC.ipsCache[domain] = RemoveIndex(gWC.ipsCache[domain], flag)
+					}
+				}
+			}
+		}
+	}
+
+	for d := range gWC.ipsCache {
+		if len(gWC.ipsCache[d]) != 0 {
+			output[d] = gWC.ipsCache[d]
+		}
+	}
+	return output
+}
+
+func saveToOutput(data map[string][]string, path string, withip bool) {
+	var output []string
+	for d := range data {
+		if withip {
+			output = append(output, d+" ["+strings.Join(data[d], ", ")+"]")
+		} else {
+			output = append(output, d)
+		}
+
+	}
+	sort.Strings(output)
 	writeLines(output, path)
 }
 
@@ -49,9 +85,9 @@ func getNSOfTarget(domain string) []string {
 	NSans = dnsMachineNormal.query(domain, "NS")
 	if len(NSans) == 0 {
 		log.Println("Cannot get any origin NS")
+		NSans = DefaultOptions.BaseResolvers
 	}
 
-	NSans = DefaultOptions.BaseResolvers
 	return NSans
 }
 
@@ -70,9 +106,7 @@ func processDomain(domain string, gWC *goWCModel, dnsMachine *DNSFactory) bool {
 	tmpDomainIps := gWC.resolve(tmpDomain, dnsMachine)
 
 	if stringInSlice(ips[0], tmpDomainIps) {
-		//log.Println("WC: " + domain)
 		rootDomainCheck := gWC.getRootOfWildcard(domain, dnsMachine)
-		//log.Println("WCRoot: " + rootDomainCheck)
 		for _, IP := range tmpDomainIps {
 			addQueue(&gWC.knownWcResult, IP, []string{rootDomainCheck}, knownWcMutex)
 		}
@@ -96,11 +130,42 @@ func worker(gWC *goWCModel, dnsMachine *DNSFactory, wg *sync.WaitGroup) {
 	}
 }
 
-func main() {
+func argsParse() *GoWcArgs {
+	args := &GoWcArgs{}
+	flag.StringVar(&args.MassdnsCache, "m", "", "Massdns output file")
+	flag.StringVar(&args.Domain, "d", "", "Massdns output file")
+	flag.IntVar(&args.Threads, "t", 20, "Threads")
+	flag.StringVar(&args.Output, "o", "output.txt", "Output file")
+	flag.BoolVar(&args.WithIp, "i", false, "Output with ips from massdns")
+	flag.Parse()
 
-	concurrency := 20
+	banner := `
+██████╗  ██████╗ ██╗    ██╗ ██████╗
+██╔════╝ ██╔═══██╗██║    ██║██╔════╝
+██║  ███╗██║   ██║██║ █╗ ██║██║     
+██║   ██║██║   ██║██║███╗██║██║     
+╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
+ ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
+                           GoWC v1.0					
+`
+
+	fmt.Print(banner)
+	switch {
+	case args.MassdnsCache == "":
+		log.Fatal("Cannot open massdns cache file")
+	case args.Domain == "":
+		log.Fatal("We don't have any target")
+	}
+
+	return args
+}
+
+func main() {
+	args := argsParse()
+	concurrency := args.Threads
+
 	//Get root NS of target
-	NSans := getNSOfTarget("viettel.vn")
+	NSans := getNSOfTarget(args.Domain)
 
 	//Initialize gWC model
 	dnsMachineOrigin, _ := InitDNSFactory(&Options{BaseResolvers: NSans})
@@ -108,15 +173,10 @@ func main() {
 	gWC.init()
 
 	//Processing
-	//processMassdnsCache("/tmp/ohdns.2bHLRD5j/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
-	//processMassdnsCache("/tmp/ohdns.W5uy9chX/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
-	//processMassdnsCache("/tmp/ohdns.fVBykYYS/massdns.txt", &gWC.domainsQueue, &gWC.ipsCache)
-	processMassdnsCache("/tmp/ohdns.lp791jHZ/massdns_tmp1.txt", &gWC.domainsQueue, &gWC.ipsCache) // viettel
-	//processMassdnsCache("/tmp/ohdns.AjvenFjk/massdns_tmp1.txt", &gWC.domainsQueue, &gWC.ipsCache) // vk.com
+	fmt.Println("Processing MassDns cache file ...")
+	processMassdnsCache(args.MassdnsCache, &gWC.domainsQueue, &gWC.ipsCache)
 
-	log.Println("Process Massdns cache...")
-	log.Println(len(gWC.domainsQueue))
-
+	fmt.Println("Invoke threads to clean Wildcards ...")
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -124,17 +184,10 @@ func main() {
 	}
 
 	wg.Wait()
-	log.Println("All goroutines done!")
-	//printResult(gWC)
-	//log.Println(gWC.ipsCache)
-	var test []string
-	for d := range gWC.ipsCache {
-		test = append(test, d)
-	}
-	writeLines(test, "/tmp/goIPscache.txt")
-	saveRootWildcardDomains(gWC, "/tmp/gowcrootwc.txt")
-	saveIpsWildcard(gWC, "/tmp/gowcIps.txt")
-
-	log.Println("Exited")
+	fmt.Println("All threads done!")
+	output := craftOutput(gWC)
+	fmt.Println("Saving output to file: " + args.Output)
+	saveToOutput(output, args.Output, args.WithIp)
+	fmt.Println("Done!")
 
 }

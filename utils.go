@@ -14,6 +14,15 @@ func stringInSlice(a string, list []string) bool {
 	return false
 }
 
+func stringInSliceWithIndex(a string, list []string) (bool, int) {
+	for i, b := range list {
+		if b == a {
+			return true, i
+		}
+	}
+	return false, -1
+}
+
 func RemoveDuplicates(s []string) []string {
 
 	encountered := make(map[string]struct{})
@@ -29,6 +38,10 @@ func RemoveDuplicates(s []string) []string {
 		}
 	}
 	return result
+}
+
+func RemoveIndex(s []string, index int) []string {
+	return append(s[:index], s[index+1:]...)
 }
 
 func CNAMEparse(str string) string {

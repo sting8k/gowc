@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/xid"
 )
@@ -11,6 +12,7 @@ import (
 var GeneratedMagicStr = xid.New().String()
 var ipsMutex = &sync.Mutex{}
 var knownWcMutex = &sync.Mutex{}
+var resolverMutex = &sync.Mutex{}
 var counter = 0
 
 type goWCModel struct {
@@ -54,7 +56,12 @@ func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
 		ips = append(ips, dnsMachine.query(domain, "CNAME")...)
 		addQueue(&m.ipsCache, domain, ips, ipsMutex)
 		delete(m.resolveQueue, domain)
-
+	} else {
+		ok := true
+		for ok {
+			ok = m.resolveQueue[domain]
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 	return m.ipsCache[domain]

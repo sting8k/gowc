@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"sync"
 
 	miekgdns "github.com/miekg/dns"
 	retryabledns "github.com/projectdiscovery/retryabledns"
@@ -69,42 +68,36 @@ func (d *DNSFactory) fastCNAMERecords(domain string) ([]string, error) {
 
 func (d *DNSFactory) query(domain string, queryType string) []string {
 	var results []string
-	resultsChannel := make(chan []string, len(d.Resolvers))
-	var wg sync.WaitGroup
-	wg.Add(len(d.Resolvers))
+	var tmp []string
+	var err error
+	tmpResolvers := d.Resolvers
+	resultsChannel := make(chan []string, len(tmpResolvers))
 
 	switch queryType {
 	case "NS":
-		for _, resolver := range d.Resolvers {
-			go func(domain, resolver string) {
-				defer wg.Done()
-				var tmp []string
-				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "NS")
-				resultsChannel <- tmp
-			}(domain, resolver)
+		for _, resolver := range tmpResolvers {
+			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "NS")
+			resultsChannel <- tmp
 		}
 	case "A":
-		for _, resolver := range d.Resolvers {
-			go func(domain, resolver string) {
-				defer wg.Done()
-				var tmp []string
-				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "A")
-				resultsChannel <- tmp
-			}(domain, resolver)
+		for _, resolver := range tmpResolvers {
+			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "A")
+			resultsChannel <- tmp
+			if err == nil {
+				break
+			}
 		}
 
 	case "CNAME":
-		for _, resolver := range d.Resolvers {
-			go func(domain, resolver string) {
-				defer wg.Done()
-				var tmp []string
-				tmp, _ = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "CNAME")
-				resultsChannel <- tmp
-			}(domain, resolver)
+		for _, resolver := range tmpResolvers {
+			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "CNAME")
+			resultsChannel <- tmp
+			if err == nil {
+				break
+			}
 		}
 
 	}
-	wg.Wait()
 	close(resultsChannel)
 	for r := range resultsChannel {
 		results = append(results, r...)
@@ -113,7 +106,7 @@ func (d *DNSFactory) query(domain string, queryType string) []string {
 
 }
 
-func makeQueryHeader(domain, resolver string, queryType uint16) (*miekgdns.Msg, error) {
+func makeQueryHeader(domain, resolver string, queryType uint16, retries int) (*miekgdns.Msg, error) {
 	msg := new(miekgdns.Msg)
 
 	msg.Id = miekgdns.Id()
@@ -128,15 +121,19 @@ func makeQueryHeader(domain, resolver string, queryType uint16) (*miekgdns.Msg, 
 	var err error
 	var answer *miekgdns.Msg
 
-	answer, err = miekgdns.Exchange(msg, resolver)
-	if err != nil {
-		return nil, err
+	for i := 0; i <= retries; i++ {
+		answer, err = miekgdns.Exchange(msg, resolver)
+		if err != nil {
+			continue
+		}
+
+		// In case we got some error from the server, return.
+		if answer != nil && answer.Rcode != miekgdns.RcodeSuccess {
+			return nil, errors.New(miekgdns.RcodeToString[answer.Rcode])
+		}
+		return answer, err
 	}
 
-	// In case we got some error from the server, return.
-	if answer != nil && answer.Rcode != miekgdns.RcodeSuccess {
-		return nil, errors.New(miekgdns.RcodeToString[answer.Rcode])
-	}
 	return answer, err
 }
 
@@ -148,7 +145,7 @@ func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error
 		"CNAME": miekgdns.TypeCNAME,
 	}
 
-	answer, err := makeQueryHeader(domain, resolver, typeMap[queryType])
+	answer, err := makeQueryHeader(domain, resolver, typeMap[queryType], 3)
 	if err != nil {
 		return result, err
 	}
@@ -168,6 +165,5 @@ func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error
 			}
 		}
 	}
-
 	return result, err
 }
