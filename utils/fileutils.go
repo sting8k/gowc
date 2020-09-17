@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"bufio"
@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-func processMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[string][]string) {
+func ProcessMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[string][]string) {
 	var tmpDomain, tmpIP string
-	domains, _ := readLines(path) // x.y.z A 22.52.25.25
+	domains, _ := ReadLines(path) // x.y.z A 22.52.25.25
 
 	for _, domain := range domains {
 		pieces := strings.Split(domain, " ")
@@ -28,7 +28,7 @@ func processMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[stri
 
 }
 
-func readLines(path string) ([]string, error) {
+func ReadLines(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func readLines(path string) ([]string, error) {
 	return lines, scanner.Err()
 }
 
-func writeLines(lines []string, path string) error {
+func WriteLines(lines []string, path string) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err

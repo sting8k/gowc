@@ -1,7 +1,8 @@
-package main
+package dnshandler
 
 import (
 	"errors"
+	"gowc/utils"
 
 	miekgdns "github.com/miekg/dns"
 )
@@ -24,7 +25,8 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 	return &DNSFactory{Resolvers: options.BaseResolvers}, nil
 }
 
-func (d *DNSFactory) query(domain string, queryType string) []string {
+func (d *DNSFactory) Query(domain string, queryType string) []string {
+
 	var results []string
 	var tmp []string
 	var err error
@@ -34,12 +36,12 @@ func (d *DNSFactory) query(domain string, queryType string) []string {
 	switch queryType {
 	case "NS":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "NS")
+			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "NS")
 			resultsChannel <- tmp
 		}
 	case "A":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "A")
+			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "A")
 			resultsChannel <- tmp
 			if err == nil {
 				break
@@ -48,7 +50,7 @@ func (d *DNSFactory) query(domain string, queryType string) []string {
 
 	case "CNAME":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, validateNSFmt(resolver), "CNAME")
+			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "CNAME")
 			resultsChannel <- tmp
 			if err == nil {
 				break
@@ -60,7 +62,7 @@ func (d *DNSFactory) query(domain string, queryType string) []string {
 	for r := range resultsChannel {
 		results = append(results, r...)
 	}
-	return RemoveDuplicates(results)
+	return utils.RemoveDuplicates(results)
 
 }
 
@@ -111,7 +113,7 @@ func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error
 		switch queryType {
 		case "NS":
 			if t, ok := record.(*miekgdns.NS); ok {
-				result = append(result, NSparse(t.String()))
+				result = append(result, utils.NSparse(t.String()))
 			}
 		case "A":
 			if t, ok := record.(*miekgdns.A); ok {
@@ -119,7 +121,7 @@ func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error
 			}
 		case "CNAME":
 			if t, ok := record.(*miekgdns.CNAME); ok {
-				result = append(result, CNAMEparse(t.String()))
+				result = append(result, utils.CNAMEparse(t.String()))
 			}
 		}
 	}

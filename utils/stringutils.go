@@ -1,11 +1,11 @@
-package main
+package utils
 
 import (
 	"regexp"
 	"strings"
 )
 
-func stringInSlice(a string, list []string) bool {
+func StringInSlice(a string, list []string) bool {
 	for _, b := range list {
 		if b == a {
 			return true
@@ -14,7 +14,7 @@ func stringInSlice(a string, list []string) bool {
 	return false
 }
 
-func stringInSliceWithIndex(a string, list []string) (bool, int) {
+func StringInSliceWithIndex(a string, list []string) (bool, int) {
 	for i, b := range list {
 		if b == a {
 			return true, i
@@ -59,7 +59,7 @@ func NSparse(str string) string {
 	return result
 }
 
-func validateNSFmt(str string) string {
+func ValidateNSFmt(str string) string {
 	r := str
 	if strings.HasSuffix(str, ":53") != true {
 		r = str + ":53"

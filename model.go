@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"gowc/dnshandler"
+	"gowc/utils"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +43,7 @@ func (m *goWCModel) popDomain() (string, error) {
 	return result, nil
 }
 
-func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
+func (m *goWCModel) resolve(domain string, dnsMachine *dnshandler.DNSFactory) []string {
 	toBeResolved := false
 	ipsMutex.Lock()
 	if _, flag1 := m.ipsCache[domain]; flag1 != true {
@@ -52,9 +54,9 @@ func (m *goWCModel) resolve(domain string, dnsMachine *DNSFactory) []string {
 	}
 	ipsMutex.Unlock()
 	if toBeResolved {
-		ips := dnsMachine.query(domain, "A")
-		ips = append(ips, dnsMachine.query(domain, "CNAME")...)
-		addQueue(&m.ipsCache, domain, ips, ipsMutex)
+		ips := dnsMachine.Query(domain, "A")
+		ips = append(ips, dnsMachine.Query(domain, "CNAME")...)
+		AddQueue(&m.ipsCache, domain, ips, ipsMutex)
 		delete(m.resolveQueue, domain)
 
 	} else {
@@ -83,21 +85,21 @@ func (m *goWCModel) ipIsWildcard(domain, ip string) bool {
 	return false
 }
 
-func (m *goWCModel) IsRootOf(domain, tmpRoot string, dnsMachine *DNSFactory) bool {
-	parentDomain := getParentDomain(domain)
+func (m *goWCModel) IsRootOf(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) bool {
+	parentDomain := GetParentDomain(domain)
 	tmpDomain := GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := m.resolve(tmpDomain, dnsMachine)
 
-	tmpParent := GeneratedMagicStr + "." + getParentDomain(tmpRoot)
+	tmpParent := GeneratedMagicStr + "." + GetParentDomain(tmpRoot)
 	tmpParentIps := m.resolve(tmpParent, dnsMachine)
 
-	if stringInSlice(tmpDomainIps[0], tmpParentIps) {
+	if utils.StringInSlice(tmpDomainIps[0], tmpParentIps) {
 		return true
 	}
 	return false
 }
 
-func (m *goWCModel) getRootOfWildcard(domain string, dnsMachine *DNSFactory) string {
+func (m *goWCModel) getRootOfWildcard(domain string, dnsMachine *dnshandler.DNSFactory) string {
 	tmpRoot := ""
 	domainPieces := strings.Split(domain, ".")
 	root := domain
@@ -121,24 +123,24 @@ func (m *goWCModel) getRootDomains() map[string]bool {
 	return rootDomains
 }
 
-func getParentDomain(s string) string {
+func GetParentDomain(s string) string {
 	return strings.Join(strings.Split(s, ".")[1:], ".")
 }
 
-func addQueue(q *map[string][]string, key string, values []string, mutex *sync.Mutex) {
+func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.Mutex) {
 	defer mutex.Unlock()
 	mutex.Lock()
 	if _, ok := (*q)[key]; ok != true {
 		(*q)[key] = []string{}
 	}
 	for _, value := range values {
-		if stringInSlice(value, (*q)[key]) != true {
+		if utils.StringInSlice(value, (*q)[key]) != true {
 			(*q)[key] = append((*q)[key], value)
 		}
 	}
 }
 
-func removeQueue(q *map[string][]string, key string, mutex *sync.Mutex) {
+func RemoveQueue(q *map[string][]string, key string, mutex *sync.Mutex) {
 	defer mutex.Unlock()
 	mutex.Lock()
 	delete(*q, key)
