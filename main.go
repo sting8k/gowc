@@ -168,6 +168,7 @@ func main() {
 
 	//Get root NS of target
 	NSans := getNSOfTarget(args.Domain)
+	fmt.Printf("Nameserver list: %q\n", NSans)
 
 	//Initialize gWC model
 	dnsMachineOrigin, _ := InitDNSFactory(&Options{BaseResolvers: NSans})
