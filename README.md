@@ -11,7 +11,7 @@ go get gitlab.com/prawps/gowc
 go build main.go
 ```
 
-Or use the [pre-built binary](https://github.com/sting8k/goWC)
+Or use the [pre-built binary](https://github.com/sting8k/gowc/releases/tag/1.0)
 
 ## Usage
 
