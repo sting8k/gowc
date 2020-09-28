@@ -3,12 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"gowc/dnshandler"
-	"gowc/utils"
 	"log"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/sting8k/gowc/dnshandler"
+	"github.com/sting8k/gowc/utils"
 )
 
 type GoWcArgs struct {

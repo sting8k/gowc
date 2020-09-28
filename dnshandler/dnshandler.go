@@ -2,7 +2,8 @@ package dnshandler
 
 import (
 	"errors"
-	"gowc/utils"
+
+	"github.com/sting8k/gowc/utils"
 
 	miekgdns "github.com/miekg/dns"
 )

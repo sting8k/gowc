@@ -2,11 +2,12 @@ package main
 
 import (
 	"errors"
-	"gowc/dnshandler"
-	"gowc/utils"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sting8k/gowc/dnshandler"
+	"github.com/sting8k/gowc/utils"
 
 	"github.com/rs/xid"
 )

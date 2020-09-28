@@ -1,4 +1,4 @@
-module gowc
+module github.com/sting8k/gowc
 
 go 1.15
 
