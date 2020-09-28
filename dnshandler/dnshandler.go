@@ -9,7 +9,8 @@ import (
 )
 
 type DNSFactory struct {
-	Resolvers []string
+	Resolvers  []string
+	MaxRetries int
 }
 
 type Options struct {
@@ -23,7 +24,7 @@ var DefaultOptions = Options{
 }
 
 func InitDNSFactory(options *Options) (*DNSFactory, error) {
-	return &DNSFactory{Resolvers: options.BaseResolvers}, nil
+	return &DNSFactory{Resolvers: options.BaseResolvers, MaxRetries: options.MaxRetries}, nil
 }
 
 func (d *DNSFactory) Query(domain string, queryType string) []string {
@@ -37,12 +38,12 @@ func (d *DNSFactory) Query(domain string, queryType string) []string {
 	switch queryType {
 	case "NS":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "NS")
+			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "NS")
 			resultsChannel <- tmp
 		}
 	case "A":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "A")
+			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "A")
 			resultsChannel <- tmp
 			if err == nil {
 				break
@@ -51,7 +52,7 @@ func (d *DNSFactory) Query(domain string, queryType string) []string {
 
 	case "CNAME":
 		for _, resolver := range tmpResolvers {
-			tmp, err = getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "CNAME")
+			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "CNAME")
 			resultsChannel <- tmp
 			if err == nil {
 				break
@@ -67,7 +68,7 @@ func (d *DNSFactory) Query(domain string, queryType string) []string {
 
 }
 
-func makeQueryHeader(domain, resolver string, queryType uint16, retries int) (*miekgdns.Msg, error) {
+func (d *DNSFactory) makeQueryHeader(domain, resolver string, queryType uint16, retries int) (*miekgdns.Msg, error) {
 	msg := new(miekgdns.Msg)
 
 	msg.Id = miekgdns.Id()
@@ -98,7 +99,7 @@ func makeQueryHeader(domain, resolver string, queryType uint16, retries int) (*m
 	return answer, err
 }
 
-func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error) {
+func (d *DNSFactory) getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error) {
 	var result []string
 	typeMap := map[string]uint16{
 		"A":     miekgdns.TypeA,
@@ -106,7 +107,7 @@ func getRecordsWithCustomNS(domain, resolver, queryType string) ([]string, error
 		"CNAME": miekgdns.TypeCNAME,
 	}
 
-	answer, err := makeQueryHeader(domain, resolver, typeMap[queryType], 3)
+	answer, err := d.makeQueryHeader(domain, resolver, typeMap[queryType], d.MaxRetries)
 	if err != nil {
 		return result, err
 	}

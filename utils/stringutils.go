@@ -25,15 +25,13 @@ func StringInSliceWithIndex(a string, list []string) (bool, int) {
 
 func RemoveDuplicates(s []string) []string {
 
-	encountered := make(map[string]struct{})
+	encountered := make(map[string]bool)
 	result := make([]string, 0)
-	//duplicate := make([]string, 0)
 	for _, v := range s {
 		if _, ok := encountered[v]; ok {
-			//duplicate = append(duplicate, v)
 			continue
 		} else {
-			encountered[v] = struct{}{}
+			encountered[v] = true
 			result = append(result, v)
 		}
 	}

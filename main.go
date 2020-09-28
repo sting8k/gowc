@@ -167,6 +167,15 @@ func argsParse() *GoWcArgs {
 
 func main() {
 	args := argsParse()
+
+	// cpuprofile := "gowc.prof"
+	// f, err := os.Create(cpuprofile)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
+
 	concurrency := args.Threads
 
 	//Get root NS of target
@@ -174,7 +183,7 @@ func main() {
 	fmt.Printf("Nameserver list: %q\n", NSans)
 
 	//Initialize gWC model
-	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{BaseResolvers: NSans})
+	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{BaseResolvers: NSans, MaxRetries: dnshandler.DefaultOptions.MaxRetries})
 	gWC := &goWCModel{}
 	gWC.init()
 
