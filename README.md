@@ -7,8 +7,8 @@ Generally, algorithm is based on [puredns](https://github.com/d3mondev/puredns),
 ## Build
 
 ```
-go get gitlab.com/prawps/gowc
-go build main.go
+go get github.com/sting8k/gowc
+go build
 ```
 
 Or use the [pre-built binary](https://github.com/sting8k/gowc/releases/tag/1.0)
