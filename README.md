@@ -1,5 +1,5 @@
 # GoWC
-A fast & accurate tool to clean **wildcards** from **massdns output file**.  
+A fast & accurate tool to clean **wildcards** from **[Massdns](https://github.com/blechschmidt/massdns) output file**.  
 This is **not** a wrapper. A wrapper will have massdns's parameters fixed inside, what is not my style. Massdns should be used in flexible way.  
 Generally, algorithm is based on [puredns](https://github.com/d3mondev/puredns), but there are few changes to make the algorithm more accurate and faster. 
 
@@ -80,6 +80,5 @@ ftl.netflix.com [45.57.40.1, 45.57.41.1]
 help.netflix.com [help.geo.netflix.com]
 ...
 ```
-
 
 
