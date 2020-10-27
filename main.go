@@ -145,7 +145,7 @@ func argsParse() *GoWcArgs {
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.0					
+                           GoWC v1.1					
 `
 	fmt.Print(banner)
 	args := &GoWcArgs{}
