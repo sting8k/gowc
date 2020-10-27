@@ -50,6 +50,9 @@ For output with ips of domains:
 ```
 
 # Example
+
+`~190k` subdomains are cleaned in just `~7s`
+
 ```
 ./gowc -d vk.com -m vk.com_massdns.txt -t 20 -o output.txt -i
 
