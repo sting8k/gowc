@@ -13,17 +13,18 @@ import (
 )
 
 var GeneratedMagicStr = xid.New().String()
-var ipsMutex = &sync.Mutex{}
-var knownWcMutex = &sync.Mutex{}
+var ipsMutex = &sync.RWMutex{}
+var knownWcMutex = &sync.RWMutex{}
 var resolverMutex = &sync.Mutex{}
+var domainQueueMutex = &sync.Mutex{}
 var counter = 0
 
 type goWCModel struct {
 	ipsCache      map[string][]string
 	knownWcResult map[string][]string
+	resolveQueue  map[string]bool
 	nsRecord      []string
 	domainsQueue  []string
-	resolveQueue  map[string]bool
 }
 
 func (m *goWCModel) init() {
@@ -36,30 +37,42 @@ func (m *goWCModel) init() {
 
 func (m *goWCModel) popDomain() (string, error) {
 	var result string
+
 	if len(m.domainsQueue) == 0 {
 		return "", errors.New("no more element")
 	}
 	result = m.domainsQueue[0]
+	defer domainQueueMutex.Unlock()
+	domainQueueMutex.Lock()
 	m.domainsQueue = m.domainsQueue[1:]
 	return result, nil
+}
+
+func (m *goWCModel) removeResolveQueue(domain string) {
+	defer resolverMutex.Unlock()
+	resolverMutex.Lock()
+	delete(m.resolveQueue, domain)
 }
 
 func (m *goWCModel) resolve(domain string, dnsMachine *dnshandler.DNSFactory) []string {
 	toBeResolved := false
 	ipsMutex.Lock()
+
 	if _, flag1 := m.ipsCache[domain]; flag1 != true {
+		resolverMutex.Lock()
 		if _, flag2 := m.resolveQueue[domain]; flag2 != true {
-			toBeResolved = true
 			m.resolveQueue[domain] = true
+			toBeResolved = true
 		}
+		resolverMutex.Unlock()
 	}
 	ipsMutex.Unlock()
+
 	if toBeResolved {
 		ips := dnsMachine.Query(domain, "A")
 		ips = append(ips, dnsMachine.Query(domain, "CNAME")...)
 		AddQueue(&m.ipsCache, domain, ips, ipsMutex)
-		delete(m.resolveQueue, domain)
-
+		m.removeResolveQueue(domain)
 	} else {
 		_, ok := m.resolveQueue[domain]
 		for ok {
@@ -68,6 +81,8 @@ func (m *goWCModel) resolve(domain string, dnsMachine *dnshandler.DNSFactory) []
 		}
 	}
 
+	defer ipsMutex.Unlock()
+	ipsMutex.Lock()
 	return m.ipsCache[domain]
 }
 
@@ -128,7 +143,7 @@ func GetParentDomain(s string) string {
 	return strings.Join(strings.Split(s, ".")[1:], ".")
 }
 
-func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.Mutex) {
+func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.RWMutex) {
 	defer mutex.Unlock()
 	mutex.Lock()
 	if _, ok := (*q)[key]; ok != true {

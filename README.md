@@ -51,7 +51,7 @@ For output with ips of domains:
 
 # Example
 ```
-./gowc -d netflix.com -m massdns_tmp1.txt -t 20 -o /tmp/tested.txt -i
+./gowc -d vk.com -m vk.com_massdns.txt -t 20 -o output.txt -i
 
  ██████╗  ██████╗ ██╗    ██╗ ██████╗
 ██╔════╝ ██╔═══██╗██║    ██║██╔════╝
@@ -59,26 +59,32 @@ For output with ips of domains:
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.0
-Nameserver list: ["8.8.8.8:53" "8.8.4.4:53" "1.1.1.1:53" "1.0.0.1:53" "ns1.netflix.com" "ns2.netflix.com" "ns-1372.awsdns-43.org" "ns-1984.awsdns-56.co.uk" "ns-659.awsdns-18.net" "ns-81.awsdns-10.com"]
-Processing MassDns cache file ...
-638 subdomains to be checked!
-Invoke threads to clean Wildcards ...
-All threads done!
-Saving output to file: /tmp/tested.txt
-Done!
+                           GoWC v1.1
+[+] Nameserver list: ["8.8.8.8:53" "8.8.4.4:53" "1.1.1.1:53" "1.0.0.1:53" "ns1.vkontakte.ru" "ns3.vkontakte.ru" "ns2.vkontakte.ru" "ns4.vkontakte.ru"]
+[i] Processing MassDns cache file ...
+[+] 190471 subdomains to be checked!
+[i] Invoke threads to clean Wildcards ...
+[i] Saving output to file: output.txt
+[!] Found 1146 valid subdomains in 7.215540611s
+
 ```
 
 Output:
 ```
 ...
-dnm.prod.us-east-1.prodaa.netflix.com [54.84.140.216, 52.21.185.7, 54.164.77.130]
-dubencovskaja.www.www.www.www.assets.obiwan.netflix.com [obiwan-wc.geo.netflix.com]
-edgecenter.netflix.com [internal-primerui-prod-elb-444824057.us-east-1.elb.amazonaws.com]
-edx.netflix.com [internal-etmarsapi-release-frontend-110816309.us-west-2.elb.amazonaws.com]
-foodvaccine.www.www.www.cms.obiwan.netflix.com [obiwan-wc.geo.netflix.com]
-ftl.netflix.com [45.57.40.1, 45.57.41.1]
-help.netflix.com [help.geo.netflix.com]
+papi.vk.com [87.240.139.156]
+post.vk.com [87.240.182.130]
+ps.vk.com [pu.vk.com]
+pu.vk.com [87.240.129.180, 87.240.137.139, 87.240.190.85, 87.240.190.74, 87.240.129.188]
+queue.vk.com [87.240.129.131, 87.240.129.186, 93.186.225.201, 93.186.225.198, 87.240.129.129]
+queuev4.vk.com [87.240.129.186, 93.186.225.201, 93.186.225.198, 87.240.129.129, 87.240.129.131]
+reply.vk.com [95.142.194.149]
+rim.vk.com [87.240.129.186]
+security.vk.com [95.142.199.216]
+smtp.vk.com [87.240.169.121]
+storage2.vk.com [87.240.139.151]
+streaming.vk.com [87.240.129.187, 87.240.190.64]
+team.vk.com [185.29.130.131]
 ...
 ```
 

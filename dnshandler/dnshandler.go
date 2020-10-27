@@ -29,22 +29,21 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 
 func (d *DNSFactory) Query(domain string, queryType string) []string {
 
-	var results []string
 	var tmp []string
 	var err error
 	tmpResolvers := d.Resolvers
-	resultsChannel := make(chan []string, len(tmpResolvers))
+	resultsPool := []string{}
 
 	switch queryType {
 	case "NS":
 		for _, resolver := range tmpResolvers {
 			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "NS")
-			resultsChannel <- tmp
+			resultsPool = append(resultsPool, tmp...)
 		}
 	case "A":
 		for _, resolver := range tmpResolvers {
 			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "A")
-			resultsChannel <- tmp
+			resultsPool = append(resultsPool, tmp...)
 			if err == nil {
 				break
 			}
@@ -53,18 +52,14 @@ func (d *DNSFactory) Query(domain string, queryType string) []string {
 	case "CNAME":
 		for _, resolver := range tmpResolvers {
 			tmp, err = d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "CNAME")
-			resultsChannel <- tmp
+			resultsPool = append(resultsPool, tmp...)
 			if err == nil {
 				break
 			}
 		}
 
 	}
-	close(resultsChannel)
-	for r := range resultsChannel {
-		results = append(results, r...)
-	}
-	return utils.RemoveDuplicates(results)
+	return utils.RemoveDuplicates(resultsPool)
 
 }
 

@@ -10,7 +10,6 @@ import (
 func ProcessMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[string][]string) {
 	var tmpDomain, tmpIP string
 	domains, _ := ReadLines(path) // x.y.z A 22.52.25.25
-
 	for _, domain := range domains {
 		pieces := strings.Split(domain, " ")
 		if len(pieces) != 3 {
@@ -25,7 +24,6 @@ func ProcessMassdnsCache(path string, domainsQueue *[]string, ipsCache *map[stri
 		(*ipsCache)[tmpDomain] = append((*ipsCache)[tmpDomain], tmpIP)
 	}
 	*domainsQueue = RemoveDuplicates(*domainsQueue)
-
 }
 
 func ReadLines(path string) ([]string, error) {

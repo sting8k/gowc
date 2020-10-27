@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sting8k/gowc/dnshandler"
 	"github.com/sting8k/gowc/utils"
@@ -25,7 +26,7 @@ func craftOutput(gWC *goWCModel) map[string][]string {
 	output := make(map[string][]string)
 	tmpRootDomains := gWC.getRootDomains()
 	ips := gWC.knownWcResult
-	var flag int
+	var idx int
 	var ok bool
 
 	rootDomains := []string{}
@@ -43,9 +44,8 @@ func craftOutput(gWC *goWCModel) map[string][]string {
 		for _, rD := range rootDomains {
 			if strings.Contains(domain, rD) && domain != rD {
 				for _, rI := range rootIps {
-					ok, flag = utils.StringInSliceWithIndex(rI, gWC.ipsCache[domain])
-					if ok {
-						gWC.ipsCache[domain] = utils.RemoveIndex(gWC.ipsCache[domain], flag)
+					if ok, idx = utils.StringInSliceWithIndex(rI, gWC.ipsCache[domain]); ok {
+						gWC.ipsCache[domain] = utils.RemoveIndex(gWC.ipsCache[domain], idx)
 					}
 				}
 			}
@@ -53,14 +53,14 @@ func craftOutput(gWC *goWCModel) map[string][]string {
 	}
 
 	for d := range gWC.ipsCache {
-		if len(gWC.ipsCache[d]) != 0 {
+		if len(gWC.ipsCache[d]) != 0 && !strings.HasPrefix(d, GeneratedMagicStr) {
 			output[d] = gWC.ipsCache[d]
 		}
 	}
 	return output
 }
 
-func saveToOutput(data map[string][]string, path string, withip bool) {
+func saveToOutput(data map[string][]string, path string, withip bool) int {
 	var output []string
 	for d := range data {
 		if withip {
@@ -72,6 +72,7 @@ func saveToOutput(data map[string][]string, path string, withip bool) {
 	}
 	sort.Strings(output)
 	utils.WriteLines(output, path)
+	return len(output)
 }
 
 func getNSOfTarget(domain string) []string {
@@ -167,20 +168,11 @@ func argsParse() *GoWcArgs {
 
 func main() {
 	args := argsParse()
-
-	// cpuprofile := "gowc.prof"
-	// f, err := os.Create(cpuprofile)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
-
 	concurrency := args.Threads
 
 	//Get root NS of target
 	NSans := getNSOfTarget(args.Domain)
-	fmt.Printf("Nameserver list: %q\n", NSans)
+	fmt.Printf("[+] Nameserver list: %q\n", NSans)
 
 	//Initialize gWC model
 	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{BaseResolvers: NSans, MaxRetries: dnshandler.DefaultOptions.MaxRetries})
@@ -188,10 +180,11 @@ func main() {
 	gWC.init()
 
 	//Processing
-	fmt.Println("Processing MassDns cache file ...")
+	fmt.Println("[i] Processing MassDns cache file ...")
 	utils.ProcessMassdnsCache(args.MassdnsCache, &gWC.domainsQueue, &gWC.ipsCache)
-	fmt.Printf("%d subdomains to be checked!\n", len(gWC.domainsQueue))
-	fmt.Println("Invoke threads to clean Wildcards ...")
+	fmt.Printf("[+] %d subdomains to be checked!\n", len(gWC.domainsQueue))
+	fmt.Println("[i] Invoke threads to clean Wildcards ...")
+	start := time.Now()
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -199,10 +192,10 @@ func main() {
 	}
 
 	wg.Wait()
-	fmt.Println("All threads done!")
+	elapsed := time.Since(start)
 	output := craftOutput(gWC)
-	fmt.Println("Saving output to file: " + args.Output)
-	saveToOutput(output, args.Output, args.WithIp)
-	fmt.Println("Done!")
+	fmt.Println("[i] Saving output to file: " + args.Output)
+	validDomains := saveToOutput(output, args.Output, args.WithIp)
+	fmt.Printf("[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
 
 }
