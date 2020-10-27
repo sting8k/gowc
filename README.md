@@ -50,7 +50,7 @@ For output with ips of domains:
 
 # Example
 ```
-./gowc -d netflix.com -m /tmp/ohdns.5ArmKzuO/massdns_tmp1.txt -t 20 -o /tmp/test.txt -i
+./gowc -d netflix.com -m massdns_tmp1.txt -t 20 -o /tmp/tested.txt -i
 
  ██████╗  ██████╗ ██╗    ██╗ ██████╗
 ██╔════╝ ██╔═══██╗██║    ██║██╔════╝
