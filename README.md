@@ -3,6 +3,8 @@ A fast & accurate tool to clean **wildcards** from **[Massdns](https://github.co
 This is **not** a wrapper. A wrapper will have massdns's parameters fixed inside, what is not my style. Massdns should be used in flexible way.  
 Generally, algorithm is based on [puredns](https://github.com/d3mondev/puredns), but there are few changes to make the algorithm more accurate and faster. 
 
+GoWC, first it will ask for NS of target domain (Ex. ns1.<target>.com, ns2.<target>.com). Then, belong with Google & CloudFlare DNS, these NS will be used to clean wildcards faster and more accurate. Why? Because sometimes, ns1 (of target) could accept wildcard subdomains, but ns2 doesn't that lead to **False Positive**. This tool will solve all these problems.
+
 ## Build
 
 ```
