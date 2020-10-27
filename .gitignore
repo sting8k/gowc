@@ -1,4 +1,5 @@
 main
 gowc
+gowc_*
 *.txt
 *.prof

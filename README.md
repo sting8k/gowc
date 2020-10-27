@@ -12,7 +12,7 @@ go get github.com/sting8k/gowc
 go build
 ```
 
-Or use the [pre-built binary](https://github.com/sting8k/gowc/releases/tag/1.0)
+Or use the [pre-built binary](https://github.com/sting8k/gowc/releases)
 
 ## Usage
 
