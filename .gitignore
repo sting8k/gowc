@@ -3,3 +3,5 @@ gowc
 gowc_*
 *.txt
 *.prof
+test
+*.out

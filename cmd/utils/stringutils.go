@@ -5,6 +5,15 @@ import (
 	"strings"
 )
 
+func IntInSlice(a uint16, list []uint16) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
 func StringInSlice(a string, list []string) bool {
 	for _, b := range list {
 		if b == a {
