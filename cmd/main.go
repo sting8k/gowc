@@ -18,7 +18,8 @@ import (
 type GoWcArgs struct {
 	MassdnsCache string
 	Domain       string
-	Threads      int
+	Timeout      int
+	Qps          int
 	Output       string
 	WithIp       bool
 }
@@ -83,6 +84,7 @@ func getNSOfTarget(domain string) ([]string, error) {
 		BaseResolversNoPort: dnshandler.DefaultOptions.BaseResolversNoPort,
 		BaseResolvers:       dnshandler.DefaultOptions.BaseResolvers,
 		MaxRetries:          dnshandler.DefaultOptions.MaxRetries,
+		Qps:                 1,
 	}
 	Resolvers := dnshandler.DefaultOptions.BaseResolvers
 
@@ -158,7 +160,7 @@ func ResolveNewDomains(domain string, gWC *model.GoWCModel, dnsMachine *dnshandl
 	gWC.ResolveRootOfWildcard(domain, dnsMachine)
 }
 
-func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
+func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int) {
 	var domain string
 	var err error
 	for _, domain := range gWC.DomainsQueue {
@@ -167,16 +169,13 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
 		}
 	}
 
-	fmt.Printf("[+] Sending %d queries ...\n", dnsMachine.QueryCounter*2)
-
 	go func() {
 		dnsMachine.ActivateQueryPool("A")
 		dnsMachine.ActivateQueryPool("CNAME")
+		fmt.Printf("[+] Sending %d queries ...\n", dnsMachine.QueryCounter)
 	}()
 
-	ResolvedNewDomains := dnsMachine.ProcessQueryPool(5)
-
-	// fmt.Println(ResolvedNewDomains)
+	ResolvedNewDomains := dnsMachine.ProcessQueryPool(timeout)
 
 	for dm, ips := range ResolvedNewDomains {
 		model.AddQueue(&gWC.IpsCache, dm, ips, model.IpsMutex)
@@ -229,7 +228,8 @@ func argsParse() *GoWcArgs {
 	args := &GoWcArgs{}
 	flag.StringVar(&args.MassdnsCache, "m", "", "Massdns output file")
 	flag.StringVar(&args.Domain, "d", "", "Domain of target")
-	flag.IntVar(&args.Threads, "t", 10, "Threads")
+	flag.IntVar(&args.Timeout, "to", 10, "Timeout (Default: 10 seconds)")
+	flag.IntVar(&args.Qps, "q", 10000, "Queries per second (Default: 10000 qps)")
 	flag.StringVar(&args.Output, "o", "output.txt", "Output file")
 	flag.BoolVar(&args.WithIp, "i", false, "Output with ips from massdns")
 	flag.Parse()
@@ -255,7 +255,8 @@ func main() {
 	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
 		BaseResolvers:       append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
 		BaseResolversNoPort: append(dnshandler.DefaultOptions.BaseResolversNoPort, NSans...),
-		MaxRetries:          dnshandler.DefaultOptions.MaxRetries},
+		MaxRetries:          dnshandler.DefaultOptions.MaxRetries,
+		Qps:                 args.Qps},
 	)
 
 	gWC := &model.GoWCModel{}
@@ -267,7 +268,7 @@ func main() {
 	fmt.Printf("[+] %d subdomains to be checked\n", len(gWC.DomainsQueue))
 
 	start := time.Now()
-	Worker(gWC, dnsMachineOrigin)
+	Worker(gWC, dnsMachineOrigin, args.Timeout)
 
 	elapsed := time.Since(start)
 	output := craftOutput(gWC)

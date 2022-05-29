@@ -27,6 +27,7 @@ type DNSFactory struct {
 }
 
 type Options struct {
+	Qps                 int
 	MaxRetries          int
 	BaseResolvers       []string
 	BaseResolversNoPort []string
@@ -35,7 +36,8 @@ type Options struct {
 var DefaultOptions = Options{
 	BaseResolvers:       []string{"8.8.8.8:53", "8.8.4.4:53", "1.1.1.1:53", "1.0.0.1:53"},
 	BaseResolversNoPort: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
-	MaxRetries:          3,
+	MaxRetries:          1,
+	Qps:                 10000,
 }
 
 var QueryMutex = &sync.RWMutex{}
@@ -44,20 +46,19 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 	theFactory := &DNSFactory{
 		Resolvers:           options.BaseResolvers,
 		BaseResolversNoPort: options.BaseResolversNoPort,
-		MaxRetries:          1,
 		TypeMap: map[string]uint16{
 			"A":     miekgdns.TypeA,
 			"NS":    miekgdns.TypeNS,
 			"CNAME": miekgdns.TypeCNAME,
 		},
 		ResolveEngine: resolve.NewResolvers(),
-		AnsChannel:    make(chan *miekgdns.Msg, 10000*2),
+		AnsChannel:    make(chan *miekgdns.Msg, options.Qps*2),
 		QueryPool:     make([]string, 0),
 		QueryCounter:  0,
 		QueryCount:    make(map[string]int, 0),
 	}
 	// theFactory.Client.Timeout = 3 * 1e9
-	theFactory.ResolveEngine.AddResolvers(10000, theFactory.BaseResolversNoPort...)
+	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolversNoPort...)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
 	return theFactory, nil
 }
@@ -66,7 +67,6 @@ func (d *DNSFactory) PushQueryPool(domain string) {
 	defer QueryMutex.Unlock()
 	QueryMutex.Lock()
 	if !utils.StringInSlice(domain, d.QueryPool) {
-		d.QueryCounter += 1
 		d.QueryPool = append(d.QueryPool, domain)
 	}
 
@@ -74,6 +74,7 @@ func (d *DNSFactory) PushQueryPool(domain string) {
 
 func (d *DNSFactory) ActivateQueryPool(queryType string) {
 	for _, domain := range d.QueryPool {
+		d.QueryCounter += 1
 		strType := strconv.FormatUint(uint64(d.TypeMap[queryType]), 10)
 		d.QueryCount[domain+strType] = 0
 		d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, d.TypeMap[queryType]), d.AnsChannel)
@@ -94,7 +95,6 @@ func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 			if len(d.AnsChannel) > 0 {
 				timedout = time.After(lengthTimeout)
 			} else {
-				d.ResolveEngineCancel()
 				return rs
 			}
 		case resp := <-d.AnsChannel:
@@ -124,8 +124,14 @@ func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 					// fmt.Println("Retrying: ", domain, d.QueryCount[domain+strType], domain+strType)
 					d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, resp.Question[0].Qtype), d.AnsChannel)
 					d.QueryCount[domain+strType]++
+					continue
 				}
 			}
+
+			d.QueryCounter--
+		}
+		if d.QueryCounter <= 0 {
+			return rs
 		}
 	}
 }
@@ -147,7 +153,6 @@ func (d *DNSFactory) queryPoolGetRecord(resp *miekgdns.Msg) []string {
 }
 
 func (d *DNSFactory) Query(domain string, queryType string) []string {
-
 	resultsPool := make([]string, 0)
 
 	switch queryType {
@@ -194,7 +199,7 @@ func (d *DNSFactory) makeQueryHeader(domain, resolver string, queryType uint16, 
 	var err error
 	var answer *miekgdns.Msg
 
-	for i := 0; i < retries; i++ {
+	for i := 0; i <= retries; i++ {
 		answer, err = miekgdns.Exchange(msg, resolver)
 		if err != nil {
 			continue
@@ -214,7 +219,6 @@ func (d *DNSFactory) getRecordsWithCustomNS(domain, resolver, queryType string) 
 	var result []string
 
 	answer, err := d.makeQueryHeader(domain, resolver, d.TypeMap[queryType], d.MaxRetries)
-
 	if err != nil {
 		return result, err
 	}
