@@ -179,7 +179,7 @@ func (m *GoWCModel) GetRootOfWildcardNewMethod(domain string) string {
 	domainPieces := strings.Split(domain, ".")
 	root := domain
 	for i := len(domainPieces) - 1; i > 0; i-- {
-		tmpRoot = strings.Join(domainPieces[i-1:], ".")
+		tmpRoot = strings.ToLower(strings.Join(domainPieces[i-1:], "."))
 		if m.IsRootOfNewMethod(domain, tmpRoot) {
 			break
 		}

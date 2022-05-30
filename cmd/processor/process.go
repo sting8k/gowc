@@ -1,6 +1,9 @@
 package processor
 
 import (
+	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/sting8k/gowc/cmd/utils"
@@ -23,4 +26,27 @@ func ProcessMassdnsCache(path string, domainsQueue *[]string, IpsCache *map[stri
 		(*IpsCache)[tmpDomain] = append((*IpsCache)[tmpDomain], tmpIP)
 	}
 	*domainsQueue = utils.RemoveDuplicates(*domainsQueue)
+}
+
+func ExportOutput(data map[string][]string, path string, withip bool) int {
+	var output []string
+	for d := range data {
+		if withip {
+			output = append(output, d+" ["+strings.Join(data[d], ", ")+"]")
+		} else {
+			output = append(output, d)
+		}
+
+	}
+	sort.Strings(output)
+
+	if path != "" {
+		fmt.Fprintln(os.Stderr, "[i] Saving output to file: "+path)
+		utils.WriteLines(output, path)
+	} else {
+		for _, line := range output {
+			fmt.Println(line)
+		}
+	}
+	return len(output)
 }

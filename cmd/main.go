@@ -2,20 +2,20 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"log"
-	"sort"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/jessevdk/go-flags"
 	"github.com/sting8k/gowc/cmd/model"
 	"github.com/sting8k/gowc/cmd/processor"
 	"github.com/sting8k/gowc/cmd/utils"
 	"github.com/sting8k/gowc/pkg/dnshandler"
 )
 
-type GoWcArgs struct {
+type GoWcArgsx struct {
 	MassdnsCache string
 	Domain       string
 	Timeout      int
@@ -60,22 +60,8 @@ func craftOutput(gWC *model.GoWCModel) map[string][]string {
 			output[d] = gWC.IpsCache[d]
 		}
 	}
+	fmt.Println(gWC.KnownWcResult)
 	return output
-}
-
-func saveToOutput(data map[string][]string, path string, withip bool) int {
-	var output []string
-	for d := range data {
-		if withip {
-			output = append(output, d+" ["+strings.Join(data[d], ", ")+"]")
-		} else {
-			output = append(output, d)
-		}
-
-	}
-	sort.Strings(output)
-	utils.WriteLines(output, path)
-	return len(output)
 }
 
 func getNSOfTarget(domain string) ([]string, error) {
@@ -99,33 +85,8 @@ func getNSOfTarget(domain string) ([]string, error) {
 		return NSans, nil
 	}
 
-	return Resolvers, errors.New("Empty NS")
+	return Resolvers, errors.New("empty NS")
 }
-
-// func processDomain(domain string, gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) bool {
-// 	ips := gWC.Resolve(domain, dnsMachine)
-// 	if len(ips) == 0 {
-// 		return false
-// 	}
-
-// 	if gWC.IpIsWildcard(domain, ips[0]) {
-// 		return true
-// 	}
-
-// 	parentDomain := model.GetParentDomain(domain)
-// 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
-// 	tmpDomainIps := gWC.Resolve(tmpDomain, dnsMachine)
-
-// 	if utils.StringInSlice(ips[0], tmpDomainIps) {
-// 		rootDomainCheck := gWC.GetRootOfWildcard(domain, dnsMachine)
-// 		for _, IP := range tmpDomainIps {
-// 			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
-// 		}
-// 		return true
-// 	}
-
-// 	return false
-// }
 
 func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 	ips := gWC.GetIpsFromCache(domain)
@@ -140,9 +101,10 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 	parentDomain := model.GetParentDomain(domain)
 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
+	// fmt.Println(tmpDomain, tmpDomainIps)
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
-		rootDomainCheck := gWC.GetRootOfWildcardNewMethod(domain)
+		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcardNewMethod(domain))
 		for _, IP := range tmpDomainIps {
 			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
 		}
@@ -172,7 +134,7 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 	go func() {
 		dnsMachine.ActivateQueryPool("A")
 		dnsMachine.ActivateQueryPool("CNAME")
-		fmt.Printf("[+] Sending %d queries ...\n", dnsMachine.QueryCounter)
+		fmt.Fprintf(os.Stderr, "[+] Sending %d queries ...\n", dnsMachine.QueryCounter)
 	}()
 
 	ResolvedNewDomains := dnsMachine.ProcessQueryPool(timeout)
@@ -181,7 +143,7 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 		model.AddQueue(&gWC.IpsCache, dm, ips, model.IpsMutex)
 	}
 
-	fmt.Println("[i] Cleaning wildcards ...")
+	fmt.Fprintln(os.Stderr, "[i] Cleaning wildcards ...")
 	for err == nil {
 		domain, err = gWC.PopDomain()
 		if domain != "" {
@@ -191,29 +153,19 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 
 }
 
-// func worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, wg *sync.WaitGroup) {
-// 	var domain string
-// 	var err error
+type GoWcArgs struct {
+	MassdnsCache string `short:"m" description:"Massdns output file" required:"true"`
+	Domain       string `short:"d" description:"Domain of target" required:"true"`
+	Timeout      int    `short:"s" long:"timeout" description:"Timeout in seconds" default:"10"`
+	Qps          int    `short:"q" long:"qps" description:"Queries per second" default:"10000"`
+	MaxRetries   int    `short:"r" long:"retries" description:"Max retries each failed query" default:"2"`
+	Output       string `short:"o" description:"Output file"`
+	WithIp       bool   `short:"i" long:"ip" description:"Output with ips from massdns"`
+}
 
-// 	err = nil
-// 	defer wg.Done()
+var gowcArgs GoWcArgs
 
-// 	for err == nil {
-// 		domain, err = gWC.PopDomain()
-// 		if domain != "" {
-// 			processDomain(domain, gWC, dnsMachine)
-// 		}
-// 	}
-// }
-
-// var wg sync.WaitGroup
-// wg.Add(concurrency)
-// for i := 0; i < concurrency; i++ {
-// 	go worker(gWC, dnsMachineOrigin, &wg)
-// }
-
-// wg.Wait()
-
+// *GoWcArgs
 func argsParse() *GoWcArgs {
 	banner := `
  ██████╗  ██████╗ ██╗    ██╗ ██████╗
@@ -224,38 +176,40 @@ func argsParse() *GoWcArgs {
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
                            GoWC v1.2					
 `
-	fmt.Print(banner)
-	args := &GoWcArgs{}
-	flag.StringVar(&args.MassdnsCache, "m", "", "Massdns output file")
-	flag.StringVar(&args.Domain, "d", "", "Domain of target")
-	flag.IntVar(&args.Timeout, "to", 10, "Timeout (Default: 10 seconds)")
-	flag.IntVar(&args.Qps, "q", 10000, "Queries per second (Default: 10000 qps)")
-	flag.StringVar(&args.Output, "o", "output.txt", "Output file")
-	flag.BoolVar(&args.WithIp, "i", false, "Output with ips from massdns")
-	flag.Parse()
+	fmt.Fprint(os.Stderr, banner)
+	_, err := flags.Parse(&gowcArgs)
 
-	switch {
-	case args.MassdnsCache == "":
-		log.Fatal("Cannot open massdns cache file")
-	case args.Domain == "":
-		log.Fatal("We don't have any target")
+	if err != nil {
+		flagError := err.(*flags.Error)
+		if flagError.Type == flags.ErrHelp {
+			// user asked for help on flags.
+			// program can exit successfully
+			os.Exit(0)
+		}
+		if flagError.Type == flags.ErrUnknownFlag {
+			fmt.Println("Use --help to view all available options.")
+			os.Exit(1)
+		}
+		// fmt.Printf("Error parsing flags: %s\n", err)
+		os.Exit(1)
 	}
-
-	return args
+	return &gowcArgs
 }
 
 func main() {
+	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+
 	args := argsParse()
 	// concurrency := args.Threads
 
 	//Get root NS of target
 	NSans, _ := getNSOfTarget(args.Domain)
-	fmt.Printf("[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolversNoPort...))
+	fmt.Fprintf(os.Stderr, "[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolversNoPort...))
 	//Initialize gWC model
 	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
 		BaseResolvers:       append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
 		BaseResolversNoPort: append(dnshandler.DefaultOptions.BaseResolversNoPort, NSans...),
-		MaxRetries:          dnshandler.DefaultOptions.MaxRetries,
+		MaxRetries:          args.MaxRetries,
 		Qps:                 args.Qps},
 	)
 
@@ -263,17 +217,15 @@ func main() {
 	gWC.Init()
 	gWC.SetMainDomain(args.Domain)
 	//Processing
-	fmt.Println("[+] Processing MassDns cache file ...")
+	fmt.Fprintln(os.Stderr, "[+] Processing MassDns cache file ...")
 	processor.ProcessMassdnsCache(args.MassdnsCache, &gWC.DomainsQueue, &gWC.IpsCache)
-	fmt.Printf("[+] %d subdomains to be checked\n", len(gWC.DomainsQueue))
+	fmt.Fprintf(os.Stderr, "[+] %d subdomains to be checked\n", len(gWC.DomainsQueue))
 
 	start := time.Now()
 	Worker(gWC, dnsMachineOrigin, args.Timeout)
 
 	elapsed := time.Since(start)
 	output := craftOutput(gWC)
-	fmt.Println("[i] Saving output to file: " + args.Output)
-	validDomains := saveToOutput(output, args.Output, args.WithIp)
-	fmt.Printf("[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
-
+	validDomains := processor.ExportOutput(output, args.Output, args.WithIp)
+	fmt.Fprintf(os.Stderr, "[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
 }

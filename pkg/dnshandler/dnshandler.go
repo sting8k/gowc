@@ -36,7 +36,7 @@ type Options struct {
 var DefaultOptions = Options{
 	BaseResolvers:       []string{"8.8.8.8:53", "8.8.4.4:53", "1.1.1.1:53", "1.0.0.1:53"},
 	BaseResolversNoPort: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
-	MaxRetries:          1,
+	MaxRetries:          2,
 	Qps:                 10000,
 }
 
