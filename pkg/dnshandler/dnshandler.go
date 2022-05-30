@@ -82,7 +82,7 @@ func (d *DNSFactory) ActivateQueryPool(queryType string) {
 	}
 }
 
-func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
+func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 	defer d.ResolveEngine.Stop()
 	defer d.ResolveEngineCancel()
 	t := time.NewTicker(time.Second)

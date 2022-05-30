@@ -136,7 +136,7 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 		fmt.Fprintf(os.Stderr, "[+] Sending %d queries ...\n", dnsMachine.QueryCounter)
 	}()
 
-	ResolvedNewDomains := dnsMachine.ProcessQueryPool(timeout)
+	ResolvedNewDomains := dnsMachine.ProcessAnswerPool(timeout)
 
 	for dm, ips := range ResolvedNewDomains {
 		model.AddQueue(&gWC.IpsCache, dm, ips, model.IpsMutex)
