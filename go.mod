@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/caffix/resolve v0.5.5-0.20220408161844-7560a499d325
+	github.com/jessevdk/go-flags v1.5.0
 	github.com/miekg/dns v1.1.49
 	github.com/rs/xid v1.2.1
 )
@@ -19,10 +20,6 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
-	github.com/hashicorp/go-version v1.0.0 // indirect
-	github.com/jessevdk/go-flags v1.5.0 // indirect
-	github.com/mitchellh/gox v1.0.1 // indirect
-	github.com/mitchellh/iochan v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	go.uber.org/ratelimit v0.2.0 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect

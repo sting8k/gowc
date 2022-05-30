@@ -152,7 +152,7 @@ func (d *DNSFactory) queryPoolGetRecord(resp *miekgdns.Msg) []string {
 	return result
 }
 
-func (d *DNSFactory) Query(domain string, queryType string) []string {
+func (d *DNSFactory) GreedQuery(domain string, queryType string) []string {
 	resultsPool := make([]string, 0)
 
 	switch queryType {

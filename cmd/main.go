@@ -80,7 +80,7 @@ func getNSOfTarget(domain string) ([]string, error) {
 		log.Fatal(err)
 	}
 
-	NSans = dnsMachineNormal.Query(domain, "NS")
+	NSans = dnsMachineNormal.GreedQuery(domain, "NS")
 	if len(NSans) != 0 {
 		return NSans, nil
 	}

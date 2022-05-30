@@ -84,8 +84,8 @@ func (m *GoWCModel) Resolve(domain string, dnsMachine *dnshandler.DNSFactory) []
 
 	if toBeResolved {
 		// fmt.Println("Resolving", domain)
-		ips := dnsMachine.Query(domain, "A")
-		ips = append(ips, dnsMachine.Query(domain, "CNAME")...)
+		ips := dnsMachine.GreedQuery(domain, "A")
+		ips = append(ips, dnsMachine.GreedQuery(domain, "CNAME")...)
 		AddQueue(&m.IpsCache, domain, ips, IpsMutex)
 		m.RemoveResolveQueue(domain)
 	} else {
