@@ -8,44 +8,43 @@ import (
 	"time"
 
 	"github.com/caffix/resolve"
+	"github.com/miekg/dns"
 	miekgdns "github.com/miekg/dns"
 	"github.com/sting8k/gowc/cmd/utils"
 )
 
 type DNSFactory struct {
-	QueryCounter        int
-	MaxRetries          int
-	QueryPool           []string
-	Resolvers           []string
-	BaseResolversNoPort []string
-	TypeMap             map[string]uint16
-	QueryCount          map[string]int
-	AnsChannel          chan *miekgdns.Msg
-	ResolveEngine       *resolve.Resolvers
+	QueryCounter  int
+	MaxRetries    int
+	QueryPool     []string
+	BaseResolvers []string
+	TypeMap       map[string]uint16
+	QueryCount    map[string]int
+	AnsChannel    chan *miekgdns.Msg
+	SubChannel    chan *miekgdns.Msg
+	ResolveEngine *resolve.Resolvers
+	// SolidResolveEngine  []*resolve.Resolvers
 	ResolveEngineCtx    context.Context
 	ResolveEngineCancel context.CancelFunc
 }
 
 type Options struct {
-	Qps                 int
-	MaxRetries          int
-	BaseResolvers       []string
-	BaseResolversNoPort []string
+	Qps           int
+	MaxRetries    int
+	BaseResolvers []string
 }
 
 var DefaultOptions = Options{
-	BaseResolvers:       []string{"8.8.8.8:53", "8.8.4.4:53", "1.1.1.1:53", "1.0.0.1:53"},
-	BaseResolversNoPort: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
-	MaxRetries:          2,
-	Qps:                 10000,
+	BaseResolvers: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
+	MaxRetries:    2,
+	Qps:           10000,
 }
 
 var QueryMutex = &sync.RWMutex{}
 
 func InitDNSFactory(options *Options) (*DNSFactory, error) {
 	theFactory := &DNSFactory{
-		Resolvers:           options.BaseResolvers,
-		BaseResolversNoPort: options.BaseResolversNoPort,
+		BaseResolvers: options.BaseResolvers,
 		TypeMap: map[string]uint16{
 			"A":     miekgdns.TypeA,
 			"NS":    miekgdns.TypeNS,
@@ -53,13 +52,15 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 		},
 		ResolveEngine: resolve.NewResolvers(),
 		AnsChannel:    make(chan *miekgdns.Msg, options.Qps*2),
-		QueryPool:     make([]string, 0),
-		QueryCounter:  0,
-		QueryCount:    make(map[string]int, 0),
+		// SubChannel:    make(chan *miekgdns.Msg, options.Qps*2),
+		QueryPool:    make([]string, 0),
+		QueryCounter: 0,
+		QueryCount:   make(map[string]int, 0),
 	}
 	// theFactory.Client.Timeout = 3 * 1e9
-	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolversNoPort...)
+	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolvers...)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
+
 	return theFactory, nil
 }
 
@@ -84,6 +85,9 @@ func (d *DNSFactory) ActivateQueryPool(queryType string) {
 func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 	defer d.ResolveEngine.Stop()
 	defer d.ResolveEngineCancel()
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+
 	lengthTimeout := time.Duration(sectimeout) * time.Second
 	timedout := time.After(lengthTimeout)
 	rs := make(map[string][]string, 0)
@@ -91,6 +95,10 @@ func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 
 	for {
 		select {
+		case <-t.C:
+			if d.QueryCounter <= 0 {
+				return rs
+			}
 		case <-timedout:
 			if len(d.AnsChannel) > 0 {
 				timedout = time.After(lengthTimeout)
@@ -98,30 +106,57 @@ func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 				return rs
 			}
 		case resp := <-d.AnsChannel:
-			// counter += 1
-			// if counter%1000 == 0 {
-			// 	fmt.Println("RESP:", counter, len(rs))
-			// }
 			timedout = time.After(lengthTimeout)
-			if resp.Rcode == miekgdns.RcodeSuccess && len(resp.Answer) > 0 {
-				for _, datum := range resolve.ExtractAnswers(resp) {
-					if !utils.IntInSlice(datum.Type, []uint16{miekgdns.TypeA, miekgdns.TypeCNAME}) {
-						continue
-					}
-					if _, ok := rs[datum.Name]; !ok {
-						rs[datum.Name] = make([]string, 0)
-						rs[datum.Name] = append(rs[datum.Name], datum.Data)
-					} else {
-						if !utils.StringInSlice(datum.Data, rs[datum.Name]) {
+			if resp.Rcode == miekgdns.RcodeSuccess {
+				if len(resp.Answer) > 0 {
+					for _, datum := range resolve.ExtractAnswers(resp) {
+						if !utils.IntInSlice(datum.Type, []uint16{miekgdns.TypeA, miekgdns.TypeCNAME}) {
+							continue
+						}
+						if _, ok := rs[datum.Name]; !ok {
+							rs[datum.Name] = make([]string, 0)
 							rs[datum.Name] = append(rs[datum.Name], datum.Data)
+						} else {
+							if !utils.StringInSlice(datum.Data, rs[datum.Name]) {
+								rs[datum.Name] = append(rs[datum.Name], datum.Data)
+							}
 						}
 					}
+				} else {
+					go func(rx *miekgdns.Msg) {
+						ans := make([]string, 0)
+						dm := resolve.RemoveLastDot(rx.Question[0].Name)
+						switch rx.Question[0].Qtype {
+						case dns.TypeA:
+							d.QueryCounter++
+							ans = d.GreedQuery(dm, "A")
+
+						case dns.TypeCNAME:
+							d.QueryCounter++
+							ans = d.GreedQuery(dm, "CNAME")
+						}
+
+						if len(ans) > 0 {
+							QueryMutex.Lock()
+							if _, ok := rs[dm]; !ok {
+								rs[dm] = make([]string, 0)
+								rs[dm] = append(rs[dm], ans...)
+							} else {
+								rs[dm] = append(rs[dm], ans...)
+								rs[dm] = utils.RemoveDuplicates(rs[dm])
+							}
+							QueryMutex.Unlock()
+						}
+
+						d.QueryCounter--
+
+					}(resp)
 				}
+
 			} else if resp.Rcode == resolve.RcodeNoResponse {
 				domain := resolve.RemoveLastDot(resp.Question[0].Name)
 				strType := strconv.FormatUint(uint64(resp.Question[0].Qtype), 10)
 				if d.QueryCount[domain+strType] <= d.MaxRetries {
-					// fmt.Println("Retrying: ", domain, d.QueryCount[domain+strType], domain+strType)
 					d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, resp.Question[0].Qtype), d.AnsChannel)
 					d.QueryCount[domain+strType]++
 					continue
@@ -129,7 +164,10 @@ func (d *DNSFactory) ProcessQueryPool(sectimeout int) map[string][]string {
 			}
 
 			d.QueryCounter--
+
 		}
+
+		// fmt.Println(d.QueryCounter)
 		if d.QueryCounter <= 0 {
 			return rs
 		}
@@ -157,12 +195,12 @@ func (d *DNSFactory) GreedQuery(domain string, queryType string) []string {
 
 	switch queryType {
 	case "NS":
-		for _, resolver := range d.Resolvers {
+		for _, resolver := range d.BaseResolvers {
 			tmp, _ := d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "NS")
 			resultsPool = append(resultsPool, tmp...)
 		}
 	case "A":
-		for _, resolver := range d.Resolvers {
+		for _, resolver := range d.BaseResolvers {
 			tmp, err := d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "A")
 			resultsPool = append(resultsPool, tmp...)
 			if err == nil {
@@ -171,7 +209,7 @@ func (d *DNSFactory) GreedQuery(domain string, queryType string) []string {
 		}
 
 	case "CNAME":
-		for _, resolver := range d.Resolvers {
+		for _, resolver := range d.BaseResolvers {
 			tmp, err := d.getRecordsWithCustomNS(domain, utils.ValidateNSFmt(resolver), "CNAME")
 			resultsPool = append(resultsPool, tmp...)
 			if err == nil {
@@ -204,7 +242,6 @@ func (d *DNSFactory) makeQueryHeader(domain, resolver string, queryType uint16, 
 		if err != nil {
 			continue
 		}
-
 		// In case we got some error from the server, return.
 		if answer != nil && answer.Rcode != miekgdns.RcodeSuccess {
 			return nil, errors.New(miekgdns.RcodeToString[answer.Rcode])

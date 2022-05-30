@@ -60,17 +60,16 @@ func craftOutput(gWC *model.GoWCModel) map[string][]string {
 			output[d] = gWC.IpsCache[d]
 		}
 	}
-	fmt.Println(gWC.KnownWcResult)
+	// fmt.Println(gWC.KnownWcResult)
 	return output
 }
 
 func getNSOfTarget(domain string) ([]string, error) {
 	var NSans []string
 	options := &dnshandler.Options{
-		BaseResolversNoPort: dnshandler.DefaultOptions.BaseResolversNoPort,
-		BaseResolvers:       dnshandler.DefaultOptions.BaseResolvers,
-		MaxRetries:          dnshandler.DefaultOptions.MaxRetries,
-		Qps:                 1,
+		BaseResolvers: dnshandler.DefaultOptions.BaseResolvers,
+		MaxRetries:    dnshandler.DefaultOptions.MaxRetries,
+		Qps:           1,
 	}
 	Resolvers := dnshandler.DefaultOptions.BaseResolvers
 
@@ -158,7 +157,7 @@ type GoWcArgs struct {
 	Domain       string `short:"d" description:"Domain of target" required:"true"`
 	Timeout      int    `short:"s" long:"timeout" description:"Timeout in seconds" default:"10"`
 	Qps          int    `short:"q" long:"qps" description:"Queries per second" default:"10000"`
-	MaxRetries   int    `short:"r" long:"retries" description:"Max retries each failed query" default:"2"`
+	MaxRetries   int    `short:"r" long:"retries" description:"Max retries each failed query" default:"1"`
 	Output       string `short:"o" description:"Output file"`
 	WithIp       bool   `short:"i" long:"ip" description:"Output with ips from massdns"`
 }
@@ -204,13 +203,12 @@ func main() {
 
 	//Get root NS of target
 	NSans, _ := getNSOfTarget(args.Domain)
-	fmt.Fprintf(os.Stderr, "[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolversNoPort...))
+	fmt.Fprintf(os.Stderr, "[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolvers...))
 	//Initialize gWC model
 	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
-		BaseResolvers:       append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
-		BaseResolversNoPort: append(dnshandler.DefaultOptions.BaseResolversNoPort, NSans...),
-		MaxRetries:          args.MaxRetries,
-		Qps:                 args.Qps},
+		BaseResolvers: append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
+		MaxRetries:    args.MaxRetries,
+		Qps:           args.Qps},
 	)
 
 	gWC := &model.GoWCModel{}

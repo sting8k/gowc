@@ -68,7 +68,7 @@ func NSparse(str string) string {
 
 func ValidateNSFmt(str string) string {
 	r := str
-	if strings.HasSuffix(str, ":53") != true {
+	if !strings.HasSuffix(str, ":53") {
 		r = str + ":53"
 	}
 	return r
