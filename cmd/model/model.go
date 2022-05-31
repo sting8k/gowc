@@ -138,7 +138,7 @@ func (m *GoWCModel) IpIsWildcard(domain, ip string) bool {
 	return false
 }
 
-func (m *GoWCModel) IsRootOf(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) bool {
+func (m *GoWCModel) IsRootOf_old(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) bool {
 	parentDomain := GetParentDomain(domain)
 	tmpDomain := GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := m.Resolve(tmpDomain, dnsMachine)
@@ -149,13 +149,13 @@ func (m *GoWCModel) IsRootOf(domain, tmpRoot string, dnsMachine *dnshandler.DNSF
 	return utils.StringInSlice(tmpDomainIps[0], tmpParentIps)
 }
 
-func (m *GoWCModel) GetRootOfWildcard(domain string, dnsMachine *dnshandler.DNSFactory) string {
+func (m *GoWCModel) GetRootOfWildcard_old(domain string, dnsMachine *dnshandler.DNSFactory) string {
 	tmpRoot := ""
 	domainPieces := strings.Split(domain, ".")
 	root := domain
 	for i := len(domainPieces) - 1; i > 0; i-- {
 		tmpRoot = strings.Join(domainPieces[i-1:], ".")
-		if m.IsRootOf(domain, tmpRoot, dnsMachine) {
+		if m.IsRootOf_old(domain, tmpRoot, dnsMachine) {
 			break
 		}
 		root = tmpRoot
@@ -163,7 +163,7 @@ func (m *GoWCModel) GetRootOfWildcard(domain string, dnsMachine *dnshandler.DNSF
 	return root
 }
 
-func (m *GoWCModel) IsRootOfNewMethod(domain, tmpRoot string) bool {
+func (m *GoWCModel) IsRootOf(domain, tmpRoot string) bool {
 	parentDomain := GetParentDomain(domain)
 	tmpDomain := GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := m.GetIpsFromCache(tmpDomain)
@@ -174,13 +174,13 @@ func (m *GoWCModel) IsRootOfNewMethod(domain, tmpRoot string) bool {
 	return utils.StringInSlice(tmpDomainIps[0], tmpParentIps)
 }
 
-func (m *GoWCModel) GetRootOfWildcardNewMethod(domain string) string {
+func (m *GoWCModel) GetRootOfWildcard(domain string) string {
 	tmpRoot := ""
 	domainPieces := strings.Split(domain, ".")
 	root := domain
 	for i := len(domainPieces) - 1; i > 0; i-- {
 		tmpRoot = strings.ToLower(strings.Join(domainPieces[i-1:], "."))
-		if m.IsRootOfNewMethod(domain, tmpRoot) {
+		if m.IsRootOf(domain, tmpRoot) {
 			break
 		}
 		root = tmpRoot

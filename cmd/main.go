@@ -85,10 +85,8 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 
 	gWC.IpsCache[domain] = utils.RemoveDuplicates(gWC.IpsCache[domain])
 
-	for i := range ips {
-		if gWC.IpIsWildcard(domain, ips[i]) {
-			return true
-		}
+	if gWC.IpIsWildcard(domain, ips[0]) {
+		return true
 	}
 
 	parentDomain := model.GetParentDomain(domain)
@@ -96,7 +94,7 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
-		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcardNewMethod(domain))
+		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcard(domain))
 		for _, IP := range tmpDomainIps {
 			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
 		}
