@@ -205,14 +205,20 @@ func (m *GoWCModel) ResolveRoot(domain, tmpRoot string, dnsMachine *dnshandler.D
 	m.PushToResolvePool(tmpParent, dnsMachine)
 }
 
-func (m *GoWCModel) GetRootDomains() map[string]bool {
-	rootDomains := make(map[string]bool)
+func (m *GoWCModel) GetRootDomains() []string {
+	rootDomains := make([]string, 0)
 	for ip := range m.KnownWcResult {
-		for _, domain := range m.KnownWcResult[ip] {
-			rootDomains[domain] = true
-		}
+		rootDomains = append(rootDomains, m.KnownWcResult[ip]...)
 	}
-	return rootDomains
+	return utils.RemoveDuplicates(rootDomains)
+}
+
+func (m *GoWCModel) GetRootIPs() []string {
+	rootIPs := make([]string, 0)
+	for ip := range m.KnownWcResult {
+		rootIPs = append(rootIPs, ip)
+	}
+	return utils.RemoveDuplicates(rootIPs)
 }
 
 func GetParentDomain(s string) string {

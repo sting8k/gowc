@@ -27,26 +27,16 @@ type GoWcArgsx struct {
 func craftOutput(gWC *model.GoWCModel) map[string][]string {
 
 	output := make(map[string][]string)
-	tmpRootDomains := gWC.GetRootDomains()
-	ips := gWC.KnownWcResult
 	var idx int
 	var ok bool
 
-	rootDomains := []string{}
-	rootIps := []string{}
-
-	for r := range tmpRootDomains {
-		rootDomains = append(rootDomains, r)
-	}
-
-	for ip := range ips {
-		rootIps = append(rootIps, ip)
-	}
+	rootDomains := gWC.GetRootDomains()
+	rootIPs := gWC.GetRootIPs()
 
 	for domain := range gWC.IpsCache {
 		for _, rD := range rootDomains {
 			if strings.Contains(domain, rD) && domain != rD {
-				for _, rI := range rootIps {
+				for _, rI := range rootIPs {
 					if ok, idx = utils.StringInSliceWithIndex(rI, gWC.IpsCache[domain]); ok {
 						gWC.IpsCache[domain] = utils.RemoveIndex(gWC.IpsCache[domain], idx)
 					}
@@ -93,14 +83,17 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 		return false
 	}
 
-	if gWC.IpIsWildcard(domain, ips[0]) {
-		return true
+	gWC.IpsCache[domain] = utils.RemoveDuplicates(gWC.IpsCache[domain])
+
+	for i := range ips {
+		if gWC.IpIsWildcard(domain, ips[i]) {
+			return true
+		}
 	}
 
 	parentDomain := model.GetParentDomain(domain)
 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
-	// fmt.Println(tmpDomain, tmpDomainIps)
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
 		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcardNewMethod(domain))
@@ -149,7 +142,6 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 			CleanWildcards(domain, gWC)
 		}
 	}
-
 }
 
 type GoWcArgs struct {
