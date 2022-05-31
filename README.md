@@ -8,7 +8,7 @@ GoWC, first it will ask for NS of target domain (Ex. ns1.<target>.com, ns2.<targ
 ## Build
 
 ```
-go get github.com/sting8k/gowc
+git clone https://github.com/sting8k/gowc
 go build
 ```
 
@@ -25,36 +25,41 @@ Or use the [pre-built binary](https://github.com/sting8k/gowc/releases)
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.0
-Usage of GoWC:
-  -d string
-        Domain of target
-  -m string
-        Massdns output file
-  -o string
-        Output file (default "output.txt")
-  -t int
-        Threads (default 10)
-  -i    Output with ips from massdns
+                           GoWC v1.2
+Usage:
+  cmd [OPTIONS]
+
+Application Options:
+  -m=            Massdns output file
+  -d=            Domain of target
+  -s, --timeout= Timeout in seconds (default: 10)
+  -q, --qps=     Queries per second (default: 10000)
+  -r, --retries= Max retries each failed query (default: 1)
+  -o=            Output file
+  -i, --ip       Output with ips from massdns
+
+Help Options:
+  -h, --help     Show this help message
+
 ```
 
 
 For normal output:
 ```
-./gowc -d <target.com> -m <massdnsOutput> -t 10 -o <output>
+./gowc -d <target.com> -m <massdnsOutput> -o <output>
 ```
 
 For output with ips of domains:
 ```
-./gowc -d <target.com> -m <massdnsOutput> -t 10 -o <output> -i
+./gowc -d <target.com> -m <massdnsOutput> -o <output> -i
 ```
 
 # Example
 
-`~190k` subdomains are cleaned in just `~7s`
+Cleaned `~190k` subdomains in just `~2.12s`
 
 ```
-./gowc -d vk.com -m vk.com_massdns.txt -t 20 -o output.txt -i
+./gowc -d vk.com -m vk.com_massdns.txt -o output.txt -i
 
  ██████╗  ██████╗ ██╗    ██╗ ██████╗
 ██╔════╝ ██╔═══██╗██║    ██║██╔════╝
@@ -63,12 +68,13 @@ For output with ips of domains:
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
                            GoWC v1.1
-[+] Nameserver list: ["8.8.8.8:53" "8.8.4.4:53" "1.1.1.1:53" "1.0.0.1:53" "ns1.vkontakte.ru" "ns3.vkontakte.ru" "ns2.vkontakte.ru" "ns4.vkontakte.ru"]
-[i] Processing MassDns cache file ...
-[+] 190471 subdomains to be checked!
-[i] Invoke threads to clean Wildcards ...
-[i] Saving output to file: output.txt
-[!] Found 1146 valid subdomains in 7.215540611s
+[+] Nameserver list: ["ns1.vkontakte.ru" "ns2.vkontakte.ru" "ns3.vkontakte.ru" "ns4.vkontakte.ru" "8.8.8.8" "8.8.4.4" "1.1.1.1" "1.0.0.1"]
+[+] Processing MassDns cache file ...
+[+] 190468 subdomains to be checked
+[+] Sending 2020 queries ...
+[i] Cleaning wildcards ...
+[i] Saving output to file: test/testvk31.txt
+[!] Found 1052 valid subdomains in 2.125442671s
 
 ```
 
