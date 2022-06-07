@@ -40,14 +40,13 @@ func (m *GoWCModel) SetMainDomain(mdm string) {
 
 func (m *GoWCModel) PopDomain() (string, error) {
 	var result string
-
-	defer DomainQueueMutex.Unlock()
-	DomainQueueMutex.Lock()
+	// defer DomainQueueMutex.Unlock()
+	// DomainQueueMutex.Lock()
 
 	if len(m.DomainsQueue) == 0 {
 		return "", errors.New("no more element")
 	}
-	// if len(m.DomainsQueue)%1000 == 0 {
+	// if len(m.DomainsQueue)%100 == 0 {
 	// 	fmt.Println("Remaining:", len(m.DomainsQueue))
 	// }
 	result = m.DomainsQueue[0]
@@ -109,23 +108,16 @@ func (m *GoWCModel) PushToResolvePool(domain string, dnsMachine *dnshandler.DNSF
 	if !strings.HasSuffix(domain, m.MainDomain) {
 		return
 	}
-
-	toBeResolved := false
-	IpsMutex.Lock()
-
-	if _, flag1 := m.IpsCache[domain]; !flag1 {
-		toBeResolved = true
-	}
-	IpsMutex.Unlock()
-
-	if toBeResolved {
-		dnsMachine.PushQueryPool(domain)
+	if _, ok := m.IpsCache[domain]; !ok {
+		if _, ok := dnsMachine.QueryDict[domain]; !ok {
+			dnsMachine.QueryDict[domain] = struct{}{}
+		}
 	}
 }
 
 func (m *GoWCModel) IpIsWildcard(domain, ip string) bool {
-	defer KnownWcMutex.Unlock()
-	KnownWcMutex.Lock()
+	// defer KnownWcMutex.Unlock()
+	// KnownWcMutex.Lock()
 	if _, ok := m.KnownWcResult[ip]; ok {
 		for wcIP := range m.KnownWcResult {
 			for _, rootDomainGot := range m.KnownWcResult[wcIP] {
@@ -232,12 +224,8 @@ func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.R
 		(*q)[key] = []string{}
 	}
 
-	for _, value := range values {
-		if !utils.StringInSlice(value, (*q)[key]) {
-			(*q)[key] = append((*q)[key], value)
-		}
-	}
-
+	(*q)[key] = append((*q)[key], values...)
+	(*q)[key] = utils.RemoveDuplicates((*q)[key])
 }
 
 func RemoveQueue(q *map[string][]string, key string, mutex *sync.Mutex) {

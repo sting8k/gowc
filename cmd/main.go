@@ -121,12 +121,8 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 		}
 	}
 
-	go func() {
-		dnsMachine.ActivateQueryPool("A")
-		dnsMachine.ActivateQueryPool("CNAME")
-		fmt.Fprintf(os.Stderr, "[+] Sending %d queries ...\n", dnsMachine.QueryCounter)
-	}()
-
+	dnsMachine.PrepareQueryPool()
+	fmt.Fprintf(os.Stderr, "[+] Testing %d subdomains ...\n", len(dnsMachine.QueryDict))
 	ResolvedNewDomains := dnsMachine.ProcessAnswerPool(timeout)
 
 	for dm, ips := range ResolvedNewDomains {
@@ -134,7 +130,7 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 	}
 
 	fmt.Fprintln(os.Stderr, "[i] Cleaning wildcards ...")
-	for err == nil {
+	for err == nil && len(gWC.DomainsQueue) > 0 {
 		domain, err = gWC.PopDomain()
 		if domain != "" {
 			CleanWildcards(domain, gWC)
@@ -163,7 +159,7 @@ func argsParse() *GoWcArgs {
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.2					
+                           GoWC v1.3					
 `
 	fmt.Fprint(os.Stderr, banner)
 	_, err := flags.Parse(&gowcArgs)
@@ -205,9 +201,9 @@ func main() {
 	gWC.Init()
 	gWC.SetMainDomain(args.Domain)
 	//Processing
-	fmt.Fprintln(os.Stderr, "[+] Processing MassDns cache file ...")
+
 	processor.ProcessMassdnsCache(args.MassdnsCache, &gWC.DomainsQueue, &gWC.IpsCache)
-	fmt.Fprintf(os.Stderr, "[+] %d subdomains to be checked\n", len(gWC.DomainsQueue))
+	fmt.Fprintf(os.Stderr, "[+] Loaded %d subdomains in MassDns cache file.\n", len(gWC.DomainsQueue))
 
 	start := time.Now()
 	Worker(gWC, dnsMachineOrigin, args.Timeout)

@@ -14,16 +14,16 @@ import (
 )
 
 type DNSFactory struct {
-	QueryCounter  int
-	MaxRetries    int
-	QueryPool     []string
-	BaseResolvers []string
-	TypeMap       map[string]uint16
-	QueryCount    map[string]int
-	AnsChannel    chan *miekgdns.Msg
-	SubChannel    chan *miekgdns.Msg
-	ResolveEngine *resolve.Resolvers
-	// SolidResolveEngine  []*resolve.Resolvers
+	QueryCounter        int
+	MaxRetries          int
+	QueryDict           map[string]struct{}
+	QueryPool           chan string
+	BaseResolvers       []string
+	TypeMap             map[string]uint16
+	QueryCount          map[string]int
+	AnsChannel          chan *miekgdns.Msg
+	SubChannel          chan *miekgdns.Msg
+	ResolveEngine       *resolve.Resolvers
 	ResolveEngineCtx    context.Context
 	ResolveEngineCancel context.CancelFunc
 }
@@ -51,35 +51,31 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 			"CNAME": miekgdns.TypeCNAME,
 		},
 		ResolveEngine: resolve.NewResolvers(),
-		AnsChannel:    make(chan *miekgdns.Msg, options.Qps*2),
-		// SubChannel:    make(chan *miekgdns.Msg, options.Qps*2),
-		QueryPool:    make([]string, 0),
-		QueryCounter: 0,
-		QueryCount:   make(map[string]int, 0),
+		AnsChannel:    make(chan *miekgdns.Msg, options.Qps*3),
+		QueryDict:     make(map[string]struct{}, 0),
+		QueryPool:     make(chan string, options.Qps),
+		QueryCounter:  0,
+		QueryCount:    make(map[string]int, 0),
 	}
-	// theFactory.Client.Timeout = 3 * 1e9
 	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolvers...)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
 
 	return theFactory, nil
 }
 
-func (d *DNSFactory) PushQueryPool(domain string) {
-	defer QueryMutex.Unlock()
-	QueryMutex.Lock()
-	if !utils.StringInSlice(domain, d.QueryPool) {
-		d.QueryPool = append(d.QueryPool, domain)
-	}
-
+func (d *DNSFactory) PrepareQueryPool() {
+	go func() {
+		for domain := range d.QueryDict {
+			d.QueryPool <- domain
+		}
+	}()
 }
 
-func (d *DNSFactory) ActivateQueryPool(queryType string) {
-	for _, domain := range d.QueryPool {
-		d.QueryCounter += 1
-		strType := strconv.FormatUint(uint64(d.TypeMap[queryType]), 10)
-		d.QueryCount[domain+strType] = 0
-		d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, d.TypeMap[queryType]), d.AnsChannel)
-	}
+func (d *DNSFactory) ActivateQueryWithQType(domain, queryType string) {
+	d.QueryCounter += 1
+	strType := strconv.FormatUint(uint64(d.TypeMap[queryType]), 10)
+	d.QueryCount[domain+strType] = 0
+	d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, d.TypeMap[queryType]), d.AnsChannel)
 }
 
 func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
@@ -87,6 +83,8 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 	defer d.ResolveEngineCancel()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	defer close(d.QueryPool)
+	defer close(d.AnsChannel)
 
 	lengthTimeout := time.Duration(sectimeout) * time.Second
 	timedout := time.After(lengthTimeout)
@@ -105,6 +103,10 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 			} else {
 				return rs
 			}
+		case domainX := <-d.QueryPool:
+			timedout = time.After(lengthTimeout)
+			d.ActivateQueryWithQType(domainX, "A")
+			d.ActivateQueryWithQType(domainX, "CNAME")
 		case resp := <-d.AnsChannel:
 			timedout = time.After(lengthTimeout)
 			if resp.Rcode == miekgdns.RcodeSuccess {
@@ -117,9 +119,9 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 							rs[datum.Name] = make([]string, 0)
 							rs[datum.Name] = append(rs[datum.Name], datum.Data)
 						} else {
-							if !utils.StringInSlice(datum.Data, rs[datum.Name]) {
-								rs[datum.Name] = append(rs[datum.Name], datum.Data)
-							}
+							// if !utils.StringInSlice(datum.Data, rs[datum.Name]) {
+							rs[datum.Name] = append(rs[datum.Name], datum.Data)
+							// }
 						}
 					}
 				} else {
@@ -168,6 +170,7 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 		}
 
 		// fmt.Println(d.QueryCounter)
+
 		if d.QueryCounter <= 0 {
 			return rs
 		}
