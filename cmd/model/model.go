@@ -109,7 +109,7 @@ func (m *GoWCModel) PushToResolvePool(domain string, dnsMachine *dnshandler.DNSF
 		return
 	}
 	if _, ok := m.IpsCache[domain]; !ok {
-		if _, ok := dnsMachine.QueryDict[domain]; !ok {
+		if _, inDict := dnsMachine.QueryDict[domain]; !inDict {
 			dnsMachine.QueryDict[domain] = struct{}{}
 		}
 	}
