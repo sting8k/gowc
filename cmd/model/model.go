@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -83,8 +84,8 @@ func (m *GoWCModel) Resolve(domain string, dnsMachine *dnshandler.DNSFactory) []
 
 	if toBeResolved {
 		// fmt.Println("Resolving", domain)
-		ips := dnsMachine.GreedQuery(domain, "A")
-		ips = append(ips, dnsMachine.GreedQuery(domain, "CNAME")...)
+		ips := dnsMachine.GreedyQuery(domain, "A")
+		ips = append(ips, dnsMachine.GreedyQuery(domain, "CNAME")...)
 		AddQueue(&m.IpsCache, domain, ips, IpsMutex)
 		m.RemoveResolveQueue(domain)
 	} else {
@@ -155,8 +156,29 @@ func (m *GoWCModel) GetRootOfWildcard_old(domain string, dnsMachine *dnshandler.
 	return root
 }
 
-func (m *GoWCModel) IsRootOf(domain, tmpRoot string) bool {
+func (m *GoWCModel) GetRootOfWildcard(domain string) string {
+	tmpRoot := ""
+	domainPieces := strings.Split(domain, ".")
+
+	root := domain
+
+	for i := len(domainPieces) - 1; i > 0; i-- {
+		tmpRoot = strings.ToLower(strings.Join(domainPieces[i-1:], "."))
+		fmt.Println("tmpRoot:", tmpRoot)
+		if m.IsWildcardRoot(tmpRoot, domain) {
+			fmt.Println(tmpRoot, "is root of", domain)
+			break
+		}
+		fmt.Println(tmpRoot, "is not root of", domain)
+		root = tmpRoot
+	}
+	fmt.Println("Final - root: ", root)
+	return root
+}
+
+func (m *GoWCModel) IsWildcardRoot(tmpRoot, domain string) bool {
 	parentDomain := GetParentDomain(domain)
+
 	tmpDomain := GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := m.GetIpsFromCache(tmpDomain)
 
@@ -164,20 +186,6 @@ func (m *GoWCModel) IsRootOf(domain, tmpRoot string) bool {
 	tmpParentIps := m.GetIpsFromCache(tmpParent)
 
 	return utils.StringInSlice(tmpDomainIps[0], tmpParentIps)
-}
-
-func (m *GoWCModel) GetRootOfWildcard(domain string) string {
-	tmpRoot := ""
-	domainPieces := strings.Split(domain, ".")
-	root := domain
-	for i := len(domainPieces) - 1; i > 0; i-- {
-		tmpRoot = strings.ToLower(strings.Join(domainPieces[i-1:], "."))
-		if m.IsRootOf(domain, tmpRoot) {
-			break
-		}
-		root = tmpRoot
-	}
-	return root
 }
 
 func (m *GoWCModel) ResolveRootOfWildcard(domain string, dnsMachine *dnshandler.DNSFactory) {
@@ -190,9 +198,6 @@ func (m *GoWCModel) ResolveRootOfWildcard(domain string, dnsMachine *dnshandler.
 }
 
 func (m *GoWCModel) ResolveRoot(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) {
-	parentDomain := GetParentDomain(domain)
-	tmpDomain := GeneratedMagicStr + "." + parentDomain
-	m.PushToResolvePool(tmpDomain, dnsMachine)
 	tmpParent := GeneratedMagicStr + "." + GetParentDomain(tmpRoot)
 	m.PushToResolvePool(tmpParent, dnsMachine)
 }
@@ -218,13 +223,18 @@ func GetParentDomain(s string) string {
 }
 
 func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.RWMutex) {
-	defer mutex.Unlock()
-	mutex.Lock()
+	// defer mutex.Unlock()
+	// mutex.Lock()
 	if _, ok := (*q)[key]; !ok {
 		(*q)[key] = []string{}
 	}
 
+	// for _, value := range values {
+	// 	if !utils.StringInSlice(value, (*q)[key]) {
+
 	(*q)[key] = append((*q)[key], values...)
+	// 	}
+	// }
 	(*q)[key] = utils.RemoveDuplicates((*q)[key])
 }
 

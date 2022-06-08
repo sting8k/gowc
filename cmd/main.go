@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func getNSOfTarget(domain string) ([]string, error) {
 		log.Fatal(err)
 	}
 
-	NSans = dnsMachineNormal.GreedQuery(domain, "NS")
+	NSans = dnsMachineNormal.GreedyQuery(domain, "NS")
 	if len(NSans) != 0 {
 		return NSans, nil
 	}
@@ -83,21 +84,28 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 		return false
 	}
 
-	gWC.IpsCache[domain] = utils.RemoveDuplicates(gWC.IpsCache[domain])
-
 	if gWC.IpIsWildcard(domain, ips[0]) {
 		return true
 	}
 
 	parentDomain := model.GetParentDomain(domain)
+
 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
+
 	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
+
+	if domain == "" {
+		fmt.Println("Debug", parentDomain, tmpDomain, tmpDomainIps, "| IPs[0]", ips)
+	}
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
 		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcard(domain))
 		for _, IP := range tmpDomainIps {
 			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
+			// fmt.Println("Key:", len(gWC.DomainsQueue), "| Wildcard domain:", domain, "|", rootDomainCheck, IP, gWC.KnownWcResult)
+			// utils.Stdinput()
 		}
+
 		return true
 	}
 
@@ -106,36 +114,63 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 
 func ResolveNewDomains(domain string, gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
 	gWC.PushToResolvePool(domain, dnsMachine)
+
 	parentDomain := model.GetParentDomain(domain)
 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
 	gWC.PushToResolvePool(tmpDomain, dnsMachine)
+
 	gWC.ResolveRootOfWildcard(domain, dnsMachine)
 }
 
 func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int) {
 	var domain string
-	var err error
 	for _, domain := range gWC.DomainsQueue {
 		if domain != "" {
 			ResolveNewDomains(domain, gWC, dnsMachine)
 		}
 	}
 
+	// Ask A Records
 	dnsMachine.PrepareQueryPool()
 	fmt.Fprintf(os.Stderr, "[+] Testing %d subdomains ...\n", len(dnsMachine.QueryDict))
-	ResolvedNewDomains := dnsMachine.ProcessAnswerPool(timeout)
+	for i := range dnsMachine.QueryDict {
+		fmt.Println(i)
+	}
+	ResolvedRecords := dnsMachine.ProcessPool(timeout)
 
-	for dm, ips := range ResolvedNewDomains {
+	// for d := range ResolvedARecords {
+	// 	delete(dnsMachine.QueryDict, d)
+	// }
+	fmt.Println("")
+
+	// Import Records
+	for dm, ips := range ResolvedRecords {
 		model.AddQueue(&gWC.IpsCache, dm, ips, model.IpsMutex)
 	}
 
-	fmt.Fprintln(os.Stderr, "[i] Cleaning wildcards ...")
-	for err == nil && len(gWC.DomainsQueue) > 0 {
-		domain, err = gWC.PopDomain()
+	dnsMachine.StopPool()
+	fmt.Println("")
+
+	fmt.Fprintln(os.Stderr, "[i] Cleaning wildcards ...", len(gWC.DomainsQueue))
+	for d := range gWC.IpsCache {
+		gWC.IpsCache[d] = utils.RemoveDuplicates(gWC.IpsCache[d])
+	}
+
+	sort.Slice(gWC.DomainsQueue, func(i, j int) bool {
+		return len(gWC.DomainsQueue[i]) < len(gWC.DomainsQueue[j])
+	})
+
+	for len(gWC.DomainsQueue) > 0 {
+		if len(gWC.DomainsQueue)%500 == 0 {
+			fmt.Printf("\rOn %d", len(gWC.DomainsQueue))
+		}
+		domain, _ = gWC.PopDomain()
 		if domain != "" {
 			CleanWildcards(domain, gWC)
 		}
 	}
+	fmt.Println("")
+	fmt.Println(gWC.KnownWcResult)
 }
 
 type GoWcArgs struct {
@@ -191,7 +226,7 @@ func main() {
 	NSans, _ := getNSOfTarget(args.Domain)
 	fmt.Fprintf(os.Stderr, "[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolvers...))
 	//Initialize gWC model
-	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
+	dnsMachine, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
 		BaseResolvers: append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
 		MaxRetries:    args.MaxRetries,
 		Qps:           args.Qps},
@@ -205,10 +240,15 @@ func main() {
 	processor.ProcessMassdnsCache(args.MassdnsCache, &gWC.DomainsQueue, &gWC.IpsCache)
 	fmt.Fprintf(os.Stderr, "[+] Loaded %d subdomains in MassDns cache file.\n", len(gWC.DomainsQueue))
 
+	if _, ok := gWC.IpsCache[gWC.MainDomain]; !ok {
+		gWC.IpsCache[gWC.MainDomain] = dnsMachine.GreedyQuery(gWC.MainDomain, "A")
+	}
+
 	start := time.Now()
-	Worker(gWC, dnsMachineOrigin, args.Timeout)
+	Worker(gWC, dnsMachine, args.Timeout)
 
 	elapsed := time.Since(start)
+	fmt.Fprintln(os.Stderr, "[i] Crafting output ...")
 	output := craftOutput(gWC)
 	validDomains := processor.ExportOutput(output, args.Output, args.WithIp)
 	fmt.Fprintf(os.Stderr, "[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
