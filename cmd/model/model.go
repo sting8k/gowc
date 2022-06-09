@@ -6,10 +6,11 @@ import (
 	"strings"
 	"sync"
 
+	cmap "github.com/orcaman/concurrent-map"
+	"github.com/rs/xid"
+	"github.com/sirupsen/logrus"
 	"github.com/sting8k/gowc/cmd/utils"
 	"github.com/sting8k/gowc/pkg/dnshandler"
-
-	"github.com/rs/xid"
 )
 
 var GeneratedMagicStr = xid.New().String()
@@ -25,6 +26,7 @@ type GoWCModel struct {
 	ResolveQueue  map[string]bool
 	NsRecord      []string
 	DomainsQueue  []string
+	IpsMap        cmap.ConcurrentMap
 }
 
 func (m *GoWCModel) Init() {
@@ -33,6 +35,8 @@ func (m *GoWCModel) Init() {
 	m.NsRecord = make([]string, 0)
 	m.DomainsQueue = make([]string, 0)
 	m.ResolveQueue = make(map[string]bool, 0)
+	m.IpsMap = cmap.New()
+
 }
 
 func (m *GoWCModel) SetMainDomain(mdm string) {
@@ -41,15 +45,12 @@ func (m *GoWCModel) SetMainDomain(mdm string) {
 
 func (m *GoWCModel) PopDomain() (string, error) {
 	var result string
-	// defer DomainQueueMutex.Unlock()
-	// DomainQueueMutex.Lock()
+	defer DomainQueueMutex.Unlock()
+	DomainQueueMutex.Lock()
 
 	if len(m.DomainsQueue) == 0 {
 		return "", errors.New("no more element")
 	}
-	// if len(m.DomainsQueue)%100 == 0 {
-	// 	fmt.Println("Remaining:", len(m.DomainsQueue))
-	// }
 	result = m.DomainsQueue[0]
 	m.DomainsQueue = m.DomainsQueue[1:]
 	return result, nil
@@ -68,41 +69,93 @@ func (m *GoWCModel) GetIpsFromCache(domain string) []string {
 	return []string{}
 }
 
-func (m *GoWCModel) Resolve(domain string, dnsMachine *dnshandler.DNSFactory) []string {
-	toBeResolved := false
-	IpsMutex.Lock()
+func ToSliceOfAny[T any](s []T) []any {
+	result := make([]any, len(s))
+	for i, v := range s {
+		result[i] = v
+	}
+	return result
+}
 
+func (m *GoWCModel) Resolve(domain string, dnsMachine *dnshandler.DNSFactory) []string {
+
+	// If domain need to be pushed in QueryDict
+	// logrus.Debug("Wait for", domain)
+	flagx := false
+	if !strings.HasSuffix(domain, m.MainDomain) {
+		return []string{}
+	}
+
+	if !m.IpsMap.Has(domain) {
+		resolverMutex.Lock()
+		if _, flag2 := dnsMachine.QueryDict[domain]; !flag2 {
+			dnsMachine.QueryDict[domain] = struct{}{}
+			flagx = true
+		}
+		resolverMutex.Unlock()
+
+		if flagx {
+			logrus.Debug("Wait for ", domain)
+			dnsMachine.QueryPool <- domain
+		}
+
+		counter := 0
+		for {
+			counter += 1
+			if counter%10000000 == 0 {
+				logrus.Debug("Ket r ", domain, " ", m.IpsMap.Has(domain))
+			}
+			if v, ok := m.IpsMap.Get(domain); ok {
+				logrus.Debug("Wait done x ", domain, " ", v)
+				return v.([]string)
+			}
+		}
+	} else {
+		v, _ := m.IpsMap.Get(domain)
+		logrus.Debug("Wait done y", domain, " ", v)
+		return v.([]string)
+	}
+
+}
+
+func (m *GoWCModel) Resolve1(domain string, dnsMachine *dnshandler.DNSFactory) []string {
+
+	IpsMutex.RLock()
+	// If domain need to be pushed in QueryDict
 	if _, flag1 := m.IpsCache[domain]; !flag1 {
 		resolverMutex.Lock()
-		if _, flag2 := m.ResolveQueue[domain]; !flag2 {
-			m.ResolveQueue[domain] = true
-			toBeResolved = true
+		if _, flag2 := dnsMachine.QueryDict[domain]; !flag2 {
+			dnsMachine.QueryDict[domain] = struct{}{}
+			dnsMachine.QueryPool <- domain
 		}
 		resolverMutex.Unlock()
-	}
-	IpsMutex.Unlock()
-
-	if toBeResolved {
-		// fmt.Println("Resolving", domain)
-		ips := dnsMachine.GreedyQuery(domain, "A")
-		ips = append(ips, dnsMachine.GreedyQuery(domain, "CNAME")...)
-		AddQueue(&m.IpsCache, domain, ips, IpsMutex)
-		m.RemoveResolveQueue(domain)
+		IpsMutex.RUnlock()
 	} else {
-		resolverMutex.Lock()
-		_, ok := m.ResolveQueue[domain]
-		resolverMutex.Unlock()
-		for ok {
-			resolverMutex.Lock()
-			ok = m.ResolveQueue[domain]
-			resolverMutex.Unlock()
-			// time.Sleep(50 * time.Millisecond)
-		}
+		return m.IpsCache[domain]
 	}
 
-	defer IpsMutex.Unlock()
-	IpsMutex.Lock()
-	return m.IpsCache[domain]
+	fmt.Println("Wait for", domain)
+
+	for {
+		IpsMutex.RLock()
+		if _, ok := m.IpsCache[domain]; ok {
+			IpsMutex.RUnlock()
+			fmt.Println("Wait done", domain)
+			return m.IpsCache[domain]
+		}
+		IpsMutex.RUnlock()
+	}
+
+	// IpsMutex.RUnlok()
+
+	// Wait to Fetch Answer
+
+	// AddQueue(&m.IpsCache, domain, ips, IpsMutex)
+	// fmt.Println("Resolving", domain)
+	// ips := dnsMachine.GreedyQuery(domain, "A")
+	// ips = append(ips, dnsMachine.GreedyQuery(domain, "CNAME")...)
+
+	// return m.IpsCache[domain]
 }
 
 func (m *GoWCModel) PushToResolvePool(domain string, dnsMachine *dnshandler.DNSFactory) {
@@ -117,8 +170,8 @@ func (m *GoWCModel) PushToResolvePool(domain string, dnsMachine *dnshandler.DNSF
 }
 
 func (m *GoWCModel) IpIsWildcard(domain, ip string) bool {
-	// defer KnownWcMutex.Unlock()
-	// KnownWcMutex.Lock()
+	defer KnownWcMutex.RUnlock()
+	KnownWcMutex.RLock()
 	if _, ok := m.KnownWcResult[ip]; ok {
 		for wcIP := range m.KnownWcResult {
 			for _, rootDomainGot := range m.KnownWcResult[wcIP] {
@@ -131,7 +184,27 @@ func (m *GoWCModel) IpIsWildcard(domain, ip string) bool {
 	return false
 }
 
-func (m *GoWCModel) IsRootOf_old(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) bool {
+func (m *GoWCModel) GetRootOfWildcardv3(domain string, dnsMachine *dnshandler.DNSFactory) string {
+	tmpRoot := ""
+	domainPieces := strings.Split(domain, ".")
+
+	root := domain
+
+	for i := len(domainPieces) - 1; i > 0; i-- {
+		tmpRoot = strings.ToLower(strings.Join(domainPieces[i-1:], "."))
+		logrus.Debug("tmpRoot:", tmpRoot)
+		if m.IsWildcardRootv3(domain, tmpRoot, dnsMachine) {
+			logrus.Debug(tmpRoot, "is root of", domain)
+			break
+		}
+		logrus.Debug(tmpRoot, "is not root of", domain)
+		root = tmpRoot
+	}
+	logrus.Debug("Final - root: ", root)
+	return root
+}
+
+func (m *GoWCModel) IsWildcardRootv3(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) bool {
 	parentDomain := GetParentDomain(domain)
 	tmpDomain := GeneratedMagicStr + "." + parentDomain
 	tmpDomainIps := m.Resolve(tmpDomain, dnsMachine)
@@ -140,20 +213,6 @@ func (m *GoWCModel) IsRootOf_old(domain, tmpRoot string, dnsMachine *dnshandler.
 	tmpParentIps := m.Resolve(tmpParent, dnsMachine)
 
 	return utils.StringInSlice(tmpDomainIps[0], tmpParentIps)
-}
-
-func (m *GoWCModel) GetRootOfWildcard_old(domain string, dnsMachine *dnshandler.DNSFactory) string {
-	tmpRoot := ""
-	domainPieces := strings.Split(domain, ".")
-	root := domain
-	for i := len(domainPieces) - 1; i > 0; i-- {
-		tmpRoot = strings.Join(domainPieces[i-1:], ".")
-		if m.IsRootOf_old(domain, tmpRoot, dnsMachine) {
-			break
-		}
-		root = tmpRoot
-	}
-	return root
 }
 
 func (m *GoWCModel) GetRootOfWildcard(domain string) string {
@@ -223,8 +282,8 @@ func GetParentDomain(s string) string {
 }
 
 func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.RWMutex) {
-	// defer mutex.Unlock()
-	// mutex.Lock()
+	defer mutex.Unlock()
+	mutex.Lock()
 	if _, ok := (*q)[key]; !ok {
 		(*q)[key] = []string{}
 	}
@@ -232,9 +291,10 @@ func AddQueue(q *map[string][]string, key string, values []string, mutex *sync.R
 	// for _, value := range values {
 	// 	if !utils.StringInSlice(value, (*q)[key]) {
 
-	(*q)[key] = append((*q)[key], values...)
 	// 	}
 	// }
+
+	(*q)[key] = append((*q)[key], values...)
 	(*q)[key] = utils.RemoveDuplicates((*q)[key])
 }
 

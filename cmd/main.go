@@ -7,9 +7,11 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jessevdk/go-flags"
+	"github.com/sirupsen/logrus"
 	"github.com/sting8k/gowc/cmd/model"
 	"github.com/sting8k/gowc/cmd/processor"
 	"github.com/sting8k/gowc/cmd/utils"
@@ -95,7 +97,7 @@ func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
 	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
 
 	if domain == "" {
-		fmt.Println("Debug", parentDomain, tmpDomain, tmpDomainIps, "| IPs[0]", ips)
+		logrus.Debug("Debug", parentDomain, tmpDomain, tmpDomainIps, "| IPs[0]", ips)
 	}
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
@@ -122,7 +124,7 @@ func ResolveNewDomains(domain string, gWC *model.GoWCModel, dnsMachine *dnshandl
 	gWC.ResolveRootOfWildcard(domain, dnsMachine)
 }
 
-func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int) {
+func Worker1(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int) {
 	var domain string
 	for _, domain := range gWC.DomainsQueue {
 		if domain != "" {
@@ -136,7 +138,7 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 	for i := range dnsMachine.QueryDict {
 		fmt.Println(i)
 	}
-	ResolvedRecords := dnsMachine.ProcessPool(timeout)
+	ResolvedRecords := make(map[string][]string, 0) // dnsMachine.ProcessPool(timeout)
 
 	// for d := range ResolvedARecords {
 	// 	delete(dnsMachine.QueryDict, d)
@@ -162,15 +164,63 @@ func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int
 
 	for len(gWC.DomainsQueue) > 0 {
 		if len(gWC.DomainsQueue)%500 == 0 {
-			fmt.Printf("\rOn %d", len(gWC.DomainsQueue))
+			fmt.Printf("\rOn %d | %d", len(gWC.DomainsQueue), dnsMachine.QueryCounter)
 		}
 		domain, _ = gWC.PopDomain()
 		if domain != "" {
 			CleanWildcards(domain, gWC)
 		}
 	}
-	fmt.Println("")
-	fmt.Println(gWC.KnownWcResult)
+	logrus.Debug("")
+	logrus.Debug(gWC.KnownWcResult)
+}
+
+func ProcessDomain(domain string, gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
+	ips := gWC.Resolve(domain, dnsMachine)
+	if len(ips) == 0 {
+		return
+	}
+
+	if gWC.IpIsWildcard(domain, ips[0]) {
+		return
+	}
+
+	parentDomain := model.GetParentDomain(domain)
+	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
+	tmpDomainIps := gWC.Resolve(tmpDomain, dnsMachine)
+
+	logrus.Debug("Wildcard check: ", domain, "|", ips[0], "|", tmpDomainIps)
+	if utils.StringInSlice(ips[0], tmpDomainIps) {
+		logrus.Debug("Wildcard check 1: ", tmpDomainIps)
+		rootDomainCheck := gWC.GetRootOfWildcardv3(domain, dnsMachine)
+		for _, IP := range tmpDomainIps {
+			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
+			logrus.Debug("Wildcard: ", domain, " ", IP, " ", rootDomainCheck)
+		}
+	}
+
+}
+
+func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, wg *sync.WaitGroup) {
+	var domain string
+	var err error
+
+	err = nil
+	defer wg.Done()
+
+	for err == nil {
+		domain, err = gWC.PopDomain()
+		logrus.Debug("Next domain: ", domain)
+		if len(gWC.DomainsQueue)%2 == 0 {
+			fmt.Printf("\rOn %d | %d", len(gWC.DomainsQueue), dnsMachine.QueryCounter)
+		}
+		if domain != "" {
+			ProcessDomain(domain, gWC, dnsMachine)
+		}
+		logrus.Debug("Process done ", domain)
+
+	}
+	dnsMachine.KillSwitch = true
 }
 
 type GoWcArgs struct {
@@ -217,7 +267,13 @@ func argsParse() *GoWcArgs {
 }
 
 func main() {
-	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+	// log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+	logrus.SetFormatter(&logrus.TextFormatter{
+		DisableColors: false,
+		FullTimestamp: false,
+	})
+	logrus.SetOutput(os.Stderr)
+	logrus.SetLevel(logrus.InfoLevel)
 
 	args := argsParse()
 	// concurrency := args.Threads
@@ -244,8 +300,42 @@ func main() {
 		gWC.IpsCache[gWC.MainDomain] = dnsMachine.GreedyQuery(gWC.MainDomain, "A")
 	}
 
+	for d := range gWC.IpsCache {
+		gWC.IpsMap.Set(d, gWC.IpsCache[d])
+	}
+
 	start := time.Now()
-	Worker(gWC, dnsMachine, args.Timeout)
+	concurrency := 20
+	// Worker(gWC, dnsMachine, args.Timeout)
+
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go Worker(gWC, dnsMachine, &wg)
+	}
+
+	go func() {
+		for {
+			select {
+			case AnsData := <-dnsMachine.AnsMap:
+				// logrus.Debug("Got it")
+				if ds, ok := gWC.IpsMap.Get(AnsData[0]); ok {
+					tmp := append(ds.([]string), AnsData[1:]...)
+					gWC.IpsMap.Set(AnsData[0], utils.RemoveDuplicates(tmp))
+				} else {
+					gWC.IpsMap.Set(AnsData[0], utils.RemoveDuplicates(AnsData[1:]))
+				}
+
+				// v, _ := gWC.IpsMap.Get(AnsData[0])
+				// logrus.Debug("Added total", AnsData[0], v.([]string))
+			}
+		}
+	}()
+
+	dnsMachine.ProcessPool(args.Timeout)
+	dnsMachine.StopPool()
+	logrus.Debug("")
+	fmt.Println("Wildcard:", gWC.KnownWcResult)
 
 	elapsed := time.Since(start)
 	fmt.Fprintln(os.Stderr, "[i] Crafting output ...")
