@@ -159,7 +159,7 @@ func argsParse() *GoWcArgs {
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.3					
+                         GoWC v1.3.1					
 `
 	fmt.Fprint(os.Stderr, banner)
 	_, err := flags.Parse(&gowcArgs)

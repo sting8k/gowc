@@ -58,6 +58,7 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 		QueryCount:    make(map[string]int, 0),
 	}
 	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolvers...)
+	theFactory.ResolveEngine.SetTimeout(time.Duration(5) * time.Second)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
 
 	return theFactory, nil
@@ -109,68 +110,83 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 			d.ActivateQueryWithQType(domainX, "CNAME")
 		case resp := <-d.AnsChannel:
 			timedout = time.After(lengthTimeout)
-			if resp.Rcode == miekgdns.RcodeSuccess {
+			domain := resolve.RemoveLastDot(resp.Question[0].Name)
+			strType := strconv.FormatUint(uint64(resp.Question[0].Qtype), 10)
+			if resp.Rcode == miekgdns.RcodeSuccess || resp.Rcode == miekgdns.RcodeNameError {
 				if len(resp.Answer) > 0 {
 					for _, datum := range resolve.ExtractAnswers(resp) {
 						if !utils.IntInSlice(datum.Type, []uint16{miekgdns.TypeA, miekgdns.TypeCNAME}) {
 							continue
 						}
-						if _, ok := rs[datum.Name]; !ok {
-							rs[datum.Name] = make([]string, 0)
-							rs[datum.Name] = append(rs[datum.Name], datum.Data)
+						if _, ok := rs[domain]; !ok {
+							rs[domain] = make([]string, 0)
+							rs[domain] = append(rs[domain], datum.Data)
 						} else {
-							// if !utils.StringInSlice(datum.Data, rs[datum.Name]) {
-							rs[datum.Name] = append(rs[datum.Name], datum.Data)
+							// if !utils.StringInSlice(datum.Data, rs[domain]) {
+							rs[domain] = append(rs[domain], datum.Data)
 							// }
 						}
 					}
+				} else if resp.Rcode == miekgdns.RcodeNameError {
+					QueryMutex.Lock()
+					if _, ok := rs[domain]; !ok {
+						rs[domain] = make([]string, 0)
+					}
+					QueryMutex.Unlock()
 				} else {
-					go func(rx *miekgdns.Msg) {
-						ans := make([]string, 0)
-						dm := resolve.RemoveLastDot(rx.Question[0].Name)
-						switch rx.Question[0].Qtype {
-						case dns.TypeA:
-							d.QueryCounter++
-							ans = d.GreedQuery(dm, "A")
+					if d.QueryCount[domain+strType] <= d.MaxRetries {
+						d.QueryCount[domain+strType]++
+						go func(rx *miekgdns.Msg, df *DNSFactory) {
+							ans := make([]string, 0)
+							dm := resolve.RemoveLastDot(rx.Question[0].Name)
+							switch rx.Question[0].Qtype {
+							case dns.TypeA:
+								df.QueryCounter++
+								ans = df.GreedQuery(dm, "A")
 
-						case dns.TypeCNAME:
-							d.QueryCounter++
-							ans = d.GreedQuery(dm, "CNAME")
-						}
-
-						if len(ans) > 0 {
-							QueryMutex.Lock()
-							if _, ok := rs[dm]; !ok {
-								rs[dm] = make([]string, 0)
-								rs[dm] = append(rs[dm], ans...)
-							} else {
-								rs[dm] = append(rs[dm], ans...)
-								rs[dm] = utils.RemoveDuplicates(rs[dm])
+							case dns.TypeCNAME:
+								df.QueryCounter++
+								ans = df.GreedQuery(dm, "CNAME")
 							}
-							QueryMutex.Unlock()
-						}
 
-						d.QueryCounter--
+							if len(ans) > 0 {
+								QueryMutex.Lock()
+								if _, ok := rs[dm]; !ok {
+									rs[dm] = make([]string, 0)
+									rs[dm] = append(rs[dm], ans...)
+								} else {
+									rs[dm] = append(rs[dm], ans...)
+									rs[dm] = utils.RemoveDuplicates(rs[dm])
+								}
+								QueryMutex.Unlock()
+							}
+							df.QueryCounter--
 
-					}(resp)
+						}(resp, d)
+						continue
+					}
 				}
 
-			} else if resp.Rcode == resolve.RcodeNoResponse {
-				domain := resolve.RemoveLastDot(resp.Question[0].Name)
-				strType := strconv.FormatUint(uint64(resp.Question[0].Qtype), 10)
+			} else {
 				if d.QueryCount[domain+strType] <= d.MaxRetries {
 					d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, resp.Question[0].Qtype), d.AnsChannel)
 					d.QueryCount[domain+strType]++
 					continue
+				} else {
+					QueryMutex.Lock()
+					if _, ok := rs[domain]; !ok {
+						rs[domain] = make([]string, 0)
+					}
+					QueryMutex.Unlock()
 				}
 			}
 
 			d.QueryCounter--
 
 		}
-
-		// fmt.Println(d.QueryCounter)
-
+		// if d.QueryCounter%1 == 0 {
+		// 	fmt.Printf("\rQueryRemaining %d", d.QueryCounter)
+		// }
 		if d.QueryCounter <= 0 {
 			return rs
 		}

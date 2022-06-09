@@ -61,7 +61,7 @@ func (m *GoWCModel) RemoveResolveQueue(domain string) {
 }
 
 func (m *GoWCModel) GetIpsFromCache(domain string) []string {
-	if ips, ok := m.IpsCache[domain]; ok {
+	if ips, ok := m.IpsCache[domain]; ok && strings.HasSuffix(domain, m.MainDomain) {
 		return ips
 	}
 	return []string{}
@@ -190,9 +190,9 @@ func (m *GoWCModel) ResolveRootOfWildcard(domain string, dnsMachine *dnshandler.
 }
 
 func (m *GoWCModel) ResolveRoot(domain, tmpRoot string, dnsMachine *dnshandler.DNSFactory) {
-	parentDomain := GetParentDomain(domain)
-	tmpDomain := GeneratedMagicStr + "." + parentDomain
-	m.PushToResolvePool(tmpDomain, dnsMachine)
+	// parentDomain := GetParentDomain(domain)
+	// tmpDomain := GeneratedMagicStr + "." + parentDomain
+	// m.PushToResolvePool(tmpDomain, dnsMachine)
 	tmpParent := GeneratedMagicStr + "." + GetParentDomain(tmpRoot)
 	m.PushToResolvePool(tmpParent, dnsMachine)
 }
