@@ -5,3 +5,4 @@ gowc_*
 *.prof
 test
 *.out
+.vscode
