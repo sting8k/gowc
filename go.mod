@@ -11,6 +11,7 @@ require (
 
 require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
+	github.com/BobuSumisu/aho-corasick v1.0.3 // indirect
 	github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129 // indirect
 	github.com/caffix/queue v0.1.3 // indirect
 	github.com/caffix/stringset v0.1.0 // indirect
@@ -18,9 +19,16 @@ require (
 	github.com/dgraph-io/badger v1.6.2 // indirect
 	github.com/dgraph-io/ristretto v0.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
+	github.com/gansidui/ahocorasick v0.0.0-20220115224400-45c8304295ef // indirect
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/iohub/ahocorasick v0.0.0-20190713143823-b7bfd8ad9e27 // indirect
+	github.com/orcaman/concurrent-map v1.0.0 // indirect
+	github.com/petar-dambovaliev/aho-corasick v0.0.0-20211021192214-5ab2d9280aa9 // indirect
+	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/sirupsen/logrus v1.8.1 // indirect
+	github.com/vcaesar/cedar v0.20.1 // indirect
 	go.uber.org/ratelimit v0.2.0 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
 	golang.org/x/net v0.0.0-20220526153639-5463443f8c37 // indirect

@@ -34,3 +34,11 @@ func WriteLines(lines []string, path string) error {
 	}
 	return w.Flush()
 }
+
+func Stdinput() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		fmt.Println("Next =======================>")
+		break
+	}
+}

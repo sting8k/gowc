@@ -6,51 +6,43 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jessevdk/go-flags"
+	"github.com/sirupsen/logrus"
 	"github.com/sting8k/gowc/cmd/model"
 	"github.com/sting8k/gowc/cmd/processor"
 	"github.com/sting8k/gowc/cmd/utils"
 	"github.com/sting8k/gowc/pkg/dnshandler"
 )
 
-type GoWcArgsx struct {
-	MassdnsCache string
-	Domain       string
-	Timeout      int
-	Qps          int
-	Output       string
-	WithIp       bool
-}
-
 func craftOutput(gWC *model.GoWCModel) map[string][]string {
 
 	output := make(map[string][]string)
-	var idx int
-	var ok bool
 
 	rootDomains := gWC.GetRootDomains()
 	rootIPs := gWC.GetRootIPs()
 
-	for domain := range gWC.IpsCache {
+	for domain := range gWC.IpsMap.IterBuffered() {
 		for _, rD := range rootDomains {
-			if strings.Contains(domain, rD) && domain != rD {
-				for _, rI := range rootIPs {
-					if ok, idx = utils.StringInSliceWithIndex(rI, gWC.IpsCache[domain]); ok {
-						gWC.IpsCache[domain] = utils.RemoveIndex(gWC.IpsCache[domain], idx)
+			if strings.Contains(domain.Key, rD) && domain.Key != rD {
+				newIPs := make([]string, 0)
+				for _, iV := range domain.Val.([]string) {
+					if !utils.StringInSlice(iV, rootIPs) {
+						newIPs = append(newIPs, iV)
 					}
 				}
+				gWC.IpsMap.Set(domain.Key, newIPs)
+				break
 			}
+		}
+
+		if v, _ := gWC.IpsMap.Get(domain.Key); len(v.([]string)) != 0 && !strings.HasPrefix(domain.Key, model.GeneratedMagicStr) {
+			output[domain.Key] = v.([]string)
 		}
 	}
 
-	for d := range gWC.IpsCache {
-		if len(gWC.IpsCache[d]) != 0 && !strings.HasPrefix(d, model.GeneratedMagicStr) {
-			output[d] = gWC.IpsCache[d]
-		}
-	}
-	// fmt.Println(gWC.KnownWcResult)
 	return output
 }
 
@@ -69,7 +61,7 @@ func getNSOfTarget(domain string) ([]string, error) {
 		log.Fatal(err)
 	}
 
-	NSans = dnsMachineNormal.GreedQuery(domain, "NS")
+	NSans = dnsMachineNormal.GreedyQuery(domain, "NS")
 	if len(NSans) != 0 {
 		return NSans, nil
 	}
@@ -77,74 +69,87 @@ func getNSOfTarget(domain string) ([]string, error) {
 	return Resolvers, errors.New("empty NS")
 }
 
-func CleanWildcards(domain string, gWC *model.GoWCModel) bool {
-	ips := gWC.GetIpsFromCache(domain)
+func CollectAnswer(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
+	for {
+		select {
+		case AnsData, more := <-dnsMachine.AnsMap:
+			if !more {
+				return
+			}
+			if ds, ok := gWC.IpsMap.Get(AnsData[0]); ok {
+				tmp := append(ds.([]string), AnsData[1:]...)
+				gWC.IpsMap.Set(AnsData[0], utils.RemoveDuplicates(tmp))
+			} else {
+				gWC.IpsMap.Set(AnsData[0], utils.RemoveDuplicates(AnsData[1:]))
+			}
+
+			v, _ := gWC.IpsMap.Get(AnsData[0])
+			logrus.Debug("Added total new ", AnsData[0], v.([]string))
+		default:
+			continue
+		}
+	}
+}
+
+func ProcessDomain(domain string, gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
+	ips, err := gWC.Resolve(domain, dnsMachine)
+	if err != nil {
+		gWC.DomainsChan <- domain
+		return
+	}
 	if len(ips) == 0 {
-		return false
+		return
 	}
 
-	gWC.IpsCache[domain] = utils.RemoveDuplicates(gWC.IpsCache[domain])
-
 	if gWC.IpIsWildcard(domain, ips[0]) {
-		return true
+		return
 	}
 
 	parentDomain := model.GetParentDomain(domain)
 	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
-	tmpDomainIps := gWC.GetIpsFromCache(tmpDomain)
+	tmpDomainIps, err := gWC.Resolve(tmpDomain, dnsMachine)
+	if err != nil {
+		gWC.DomainsChan <- domain
+		return
+	}
 
 	if utils.StringInSlice(ips[0], tmpDomainIps) {
-		rootDomainCheck := strings.ToLower(gWC.GetRootOfWildcard(domain))
+		rootDomainCheck, err := gWC.GetRootOfWildcard(domain, dnsMachine)
+		if err != nil {
+			gWC.DomainsChan <- domain
+			return
+		}
 		for _, IP := range tmpDomainIps {
 			model.AddQueue(&gWC.KnownWcResult, IP, []string{rootDomainCheck}, model.KnownWcMutex)
 		}
-		return true
 	}
 
-	return false
 }
 
-func ResolveNewDomains(domain string, gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory) {
-	gWC.PushToResolvePool(domain, dnsMachine)
-	parentDomain := model.GetParentDomain(domain)
-	tmpDomain := model.GeneratedMagicStr + "." + parentDomain
-	gWC.PushToResolvePool(tmpDomain, dnsMachine)
-	gWC.ResolveRootOfWildcard(domain, dnsMachine)
-}
-
-func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, timeout int) {
+func Worker(gWC *model.GoWCModel, dnsMachine *dnshandler.DNSFactory, wg *sync.WaitGroup) {
 	var domain string
-	var err error
-	for _, domain := range gWC.DomainsQueue {
-		if domain != "" {
-			ResolveNewDomains(domain, gWC, dnsMachine)
-		}
-	}
+	defer wg.Done()
 
-	dnsMachine.PrepareQueryPool()
-	fmt.Fprintf(os.Stderr, "[+] Testing %d subdomains ...\n", len(dnsMachine.QueryDict))
-	ResolvedNewDomains := dnsMachine.ProcessAnswerPool(timeout)
-
-	for dm, ips := range ResolvedNewDomains {
-		model.AddQueue(&gWC.IpsCache, dm, ips, model.IpsMutex)
-	}
-
-	fmt.Fprintln(os.Stderr, "[i] Cleaning wildcards ...")
-	for err == nil && len(gWC.DomainsQueue) > 0 {
-		domain, err = gWC.PopDomain()
-		if domain != "" {
-			CleanWildcards(domain, gWC)
+	for len(gWC.DomainsChan) > 0 {
+		select {
+		case domain = <-gWC.DomainsChan:
+			if domain != "" {
+				ProcessDomain(domain, gWC, dnsMachine)
+			}
+		default:
+			continue
 		}
 	}
 }
 
 type GoWcArgs struct {
 	MassdnsCache string `short:"m" description:"Massdns output file" required:"true"`
-	Domain       string `short:"d" description:"Domain of target" required:"true"`
-	Timeout      int    `short:"s" long:"timeout" description:"Timeout in seconds" default:"10"`
+	Domain       string `short:"d" long:"domain" description:"Domain of target" required:"true"`
+	Threads      int    `short:"t" long:"threads" description:"Threads" default:"20"`
+	Timeout      int    `short:"s" long:"timeout" description:"Timeout in seconds" default:"5"`
 	Qps          int    `short:"q" long:"qps" description:"Queries per second" default:"10000"`
 	MaxRetries   int    `short:"r" long:"retries" description:"Max retries each failed query" default:"1"`
-	Output       string `short:"o" description:"Output file"`
+	Output       string `short:"o" long:"output" description:"Output file"`
 	WithIp       bool   `short:"i" long:"ip" description:"Output with ips from massdns"`
 }
 
@@ -159,7 +164,7 @@ func argsParse() *GoWcArgs {
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                         GoWC v1.3.1					
+                         GoWC v1.3.5					
 `
 	fmt.Fprint(os.Stderr, banner)
 	_, err := flags.Parse(&gowcArgs)
@@ -182,34 +187,86 @@ func argsParse() *GoWcArgs {
 }
 
 func main() {
-	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+	// log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
+	logrus.SetFormatter(&logrus.TextFormatter{
+		DisableColors: false,
+		FullTimestamp: false,
+	})
+	logrus.SetOutput(os.Stderr)
+	logrus.SetLevel(logrus.ErrorLevel)
 
 	args := argsParse()
-	// concurrency := args.Threads
 
 	//Get root NS of target
 	NSans, _ := getNSOfTarget(args.Domain)
-	fmt.Fprintf(os.Stderr, "[+] Nameserver list: %q\n", append(NSans, dnshandler.DefaultOptions.BaseResolvers...))
+	fmt.Fprintf(os.Stderr, "[+] Nameserver list: \n\t+ %s\n", strings.Join(append(NSans, dnshandler.DefaultOptions.BaseResolvers...), "\n\t+ "))
 	//Initialize gWC model
-	dnsMachineOrigin, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
+	dnsMachine, _ := dnshandler.InitDNSFactory(&dnshandler.Options{
 		BaseResolvers: append(dnshandler.DefaultOptions.BaseResolvers, NSans...),
 		MaxRetries:    args.MaxRetries,
-		Qps:           args.Qps},
+		Qps:           args.Qps,
+		Timeout:       args.Timeout},
 	)
 
 	gWC := &model.GoWCModel{}
 	gWC.Init()
 	gWC.SetMainDomain(args.Domain)
-	//Processing
 
-	processor.ProcessMassdnsCache(args.MassdnsCache, &gWC.DomainsQueue, &gWC.IpsCache)
-	fmt.Fprintf(os.Stderr, "[+] Loaded %d subdomains in MassDns cache file.\n", len(gWC.DomainsQueue))
+	processor.ProcessMassdnsCache(args.MassdnsCache, gWC)
+
+	fmt.Fprintf(os.Stderr, "[+] Loaded %d subdomains in MassDns cache file.\n", gWC.IpsMap.Count())
+
+	if !gWC.IpsMap.Has(gWC.MainDomain) {
+		gWC.IpsMap.Set(gWC.MainDomain, dnsMachine.GreedyQuery(gWC.MainDomain, "A"))
+	}
 
 	start := time.Now()
-	Worker(gWC, dnsMachineOrigin, args.Timeout)
 
-	elapsed := time.Since(start)
+	gWC.DomainsChan = make(chan string, gWC.IpsMap.Count()*2)
+	for i := range gWC.SortedList {
+		gWC.DomainsChan <- gWC.SortedList[i]
+	}
+
+	var wg sync.WaitGroup
+	concurrency := args.Threads
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go Worker(gWC, dnsMachine, &wg)
+	}
+
+	go CollectAnswer(gWC, dnsMachine)
+	go dnsMachine.ProcessPool(args.Timeout)
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		progressLine := len(fmt.Sprintf("\r[i] Sent %d queries. %d subdomains remaining ...", dnsMachine.QueryCounter, len(gWC.DomainsChan)))
+		// logrus.Debugf("On %d | %d | %d | %d \n", dnsMachine.QueryCounter, len(gWC.DomainsChan), len(gWC.KnownWcResult), runtime.NumGoroutine())
+		for dnsMachine.QueryCounter != -1 {
+			// logrus.Debugf("On %d | %d | %d | %d \n", dnsMachine.QueryCounter, len(gWC.DomainsChan), len(gWC.KnownWcResult), runtime.NumGoroutine())
+			currentLine := fmt.Sprintf("\r[i] Sent %d queries. %d subdomains remaining ...", dnsMachine.QueryCounter, len(gWC.DomainsChan))
+			padding := ""
+			if progressLine-len(currentLine) > 0 {
+				padding = strings.Repeat(" ", progressLine-len(currentLine))
+			}
+			fmt.Fprintf(os.Stderr, currentLine+padding)
+			time.Sleep(5000 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+
+	fmt.Fprintf(os.Stderr, "\n[!] Sent %d queries. All subdomains resolved.\n", dnsMachine.QueryCounter)
+
+	// Clean
+	dnsMachine.KillSwitch <- true
+	dnsMachine.StopResolveEngine()
+	close(gWC.DomainsChan)
+
+	fmt.Fprintln(os.Stderr, "\n[+] Wildcard domains:\n\t+", strings.Join(gWC.GetRootIPs(), "\n\t+ "))
+
+	fmt.Fprintln(os.Stderr, "[i] Crafting output ...")
 	output := craftOutput(gWC)
+	elapsed := time.Since(start)
 	validDomains := processor.ExportOutput(output, args.Output, args.WithIp)
-	fmt.Fprintf(os.Stderr, "[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
+	fmt.Fprintf(os.Stderr, "\n[!] Found %d valid subdomains in %s\n", validDomains, elapsed)
 }

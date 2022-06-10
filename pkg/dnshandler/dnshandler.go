@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,15 +15,17 @@ import (
 )
 
 type DNSFactory struct {
+	KillSwitch          chan bool
 	QueryCounter        int
 	MaxRetries          int
 	QueryDict           map[string]struct{}
 	QueryPool           chan string
 	BaseResolvers       []string
 	TypeMap             map[string]uint16
-	QueryCount          map[string]int
+	RetryCounter        map[string]int
+	AnsMap              chan []string
 	AnsChannel          chan *miekgdns.Msg
-	SubChannel          chan *miekgdns.Msg
+	SubChannel          chan []string
 	ResolveEngine       *resolve.Resolvers
 	ResolveEngineCtx    context.Context
 	ResolveEngineCancel context.CancelFunc
@@ -31,6 +34,7 @@ type DNSFactory struct {
 type Options struct {
 	Qps           int
 	MaxRetries    int
+	Timeout       int
 	BaseResolvers []string
 }
 
@@ -38,12 +42,14 @@ var DefaultOptions = Options{
 	BaseResolvers: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
 	MaxRetries:    2,
 	Qps:           10000,
+	Timeout:       5,
 }
 
 var QueryMutex = &sync.RWMutex{}
 
 func InitDNSFactory(options *Options) (*DNSFactory, error) {
 	theFactory := &DNSFactory{
+		KillSwitch:    make(chan bool, 1),
 		BaseResolvers: options.BaseResolvers,
 		TypeMap: map[string]uint16{
 			"A":     miekgdns.TypeA,
@@ -51,14 +57,16 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 			"CNAME": miekgdns.TypeCNAME,
 		},
 		ResolveEngine: resolve.NewResolvers(),
+		AnsMap:        make(chan []string, options.Qps*3),
 		AnsChannel:    make(chan *miekgdns.Msg, options.Qps*3),
+		SubChannel:    make(chan []string, options.Qps),
 		QueryDict:     make(map[string]struct{}, 0),
 		QueryPool:     make(chan string, options.Qps),
 		QueryCounter:  0,
-		QueryCount:    make(map[string]int, 0),
+		RetryCounter:  make(map[string]int, 0),
 	}
 	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolvers...)
-	theFactory.ResolveEngine.SetTimeout(time.Duration(5) * time.Second)
+	theFactory.ResolveEngine.SetTimeout(time.Duration(options.Timeout) * time.Second)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
 
 	return theFactory, nil
@@ -72,45 +80,69 @@ func (d *DNSFactory) PrepareQueryPool() {
 	}()
 }
 
-func (d *DNSFactory) ActivateQueryWithQType(domain, queryType string) {
+func (d *DNSFactory) _ActivateQueryWithQType(domain, queryType string) {
 	d.QueryCounter += 1
 	strType := strconv.FormatUint(uint64(d.TypeMap[queryType]), 10)
-	d.QueryCount[domain+strType] = 0
+	d.RetryCounter[domain+strType] = 0
 	d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, d.TypeMap[queryType]), d.AnsChannel)
 }
 
-func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
-	defer d.ResolveEngine.Stop()
-	defer d.ResolveEngineCancel()
+func (d *DNSFactory) RetryQuery(loadedresp *miekgdns.Msg) {
+	domain := strings.ToLower(resolve.RemoveLastDot(loadedresp.Question[0].Name))
+	strType := strconv.FormatUint(uint64(loadedresp.Question[0].Qtype), 10)
+
+	if d.RetryCounter[domain+strType] <= d.MaxRetries {
+		d.RetryCounter[domain+strType]++
+		// go func(rx *miekgdns.Msg) {
+		switch loadedresp.Question[0].Qtype {
+		case dns.TypeA:
+			d.QueryCounter++
+			go func(dm string) {
+				dX := append([]string{dm}, d.GreedyQuery(dm, "A")...)
+				d.SubChannel <- dX
+			}(domain)
+
+		case dns.TypeCNAME:
+			d.QueryCounter++
+			go func(dm string) {
+				dX := append([]string{dm}, d.GreedyQuery(dm, "CNAME")...)
+				d.SubChannel <- dX
+			}(domain)
+		}
+	} else {
+		d.SubChannel <- []string{domain}
+	}
+}
+
+func (d *DNSFactory) ProcessPool(sectimeout int) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
-	defer close(d.QueryPool)
-	defer close(d.AnsChannel)
-
 	lengthTimeout := time.Duration(sectimeout) * time.Second
 	timedout := time.After(lengthTimeout)
-	rs := make(map[string][]string, 0)
-	// counter := 0
 
 	for {
 		select {
-		case <-t.C:
-			if d.QueryCounter <= 0 {
-				return rs
-			}
-		case <-timedout:
+		case <-timedout: // do nothing
 			if len(d.AnsChannel) > 0 {
 				timedout = time.After(lengthTimeout)
-			} else {
-				return rs
 			}
+		case <-d.KillSwitch:
+			close(d.KillSwitch)
+			return
 		case domainX := <-d.QueryPool:
 			timedout = time.After(lengthTimeout)
-			d.ActivateQueryWithQType(domainX, "A")
-			d.ActivateQueryWithQType(domainX, "CNAME")
+
+			d._ActivateQueryWithQType(domainX, "A")
+			d._ActivateQueryWithQType(domainX, "CNAME")
+		case ans := <-d.SubChannel:
+			timedout = time.After(lengthTimeout)
+			if len(ans) >= 1 {
+				d.AnsMap <- ans
+			}
+			//noted  d.QueryCounter--
 		case resp := <-d.AnsChannel:
 			timedout = time.After(lengthTimeout)
-			domain := resolve.RemoveLastDot(resp.Question[0].Name)
+			domain := strings.ToLower(resolve.RemoveLastDot(resp.Question[0].Name))
 			strType := strconv.FormatUint(uint64(resp.Question[0].Qtype), 10)
 			if resp.Rcode == miekgdns.RcodeSuccess || resp.Rcode == miekgdns.RcodeNameError {
 				if len(resp.Answer) > 0 {
@@ -118,79 +150,46 @@ func (d *DNSFactory) ProcessAnswerPool(sectimeout int) map[string][]string {
 						if !utils.IntInSlice(datum.Type, []uint16{miekgdns.TypeA, miekgdns.TypeCNAME}) {
 							continue
 						}
-						if _, ok := rs[domain]; !ok {
-							rs[domain] = make([]string, 0)
-							rs[domain] = append(rs[domain], datum.Data)
-						} else {
-							// if !utils.StringInSlice(datum.Data, rs[domain]) {
-							rs[domain] = append(rs[domain], datum.Data)
-							// }
-						}
+						d.AnsMap <- []string{domain, datum.Data}
 					}
 				} else if resp.Rcode == miekgdns.RcodeNameError {
-					QueryMutex.Lock()
-					if _, ok := rs[domain]; !ok {
-						rs[domain] = make([]string, 0)
-					}
-					QueryMutex.Unlock()
+					d.AnsMap <- []string{domain}
 				} else {
-					if d.QueryCount[domain+strType] <= d.MaxRetries {
-						d.QueryCount[domain+strType]++
-						go func(rx *miekgdns.Msg, df *DNSFactory) {
-							ans := make([]string, 0)
-							dm := resolve.RemoveLastDot(rx.Question[0].Name)
-							switch rx.Question[0].Qtype {
-							case dns.TypeA:
-								df.QueryCounter++
-								ans = df.GreedQuery(dm, "A")
-
-							case dns.TypeCNAME:
-								df.QueryCounter++
-								ans = df.GreedQuery(dm, "CNAME")
-							}
-
-							if len(ans) > 0 {
-								QueryMutex.Lock()
-								if _, ok := rs[dm]; !ok {
-									rs[dm] = make([]string, 0)
-									rs[dm] = append(rs[dm], ans...)
-								} else {
-									rs[dm] = append(rs[dm], ans...)
-									rs[dm] = utils.RemoveDuplicates(rs[dm])
-								}
-								QueryMutex.Unlock()
-							}
-							df.QueryCounter--
-
-						}(resp, d)
-						continue
-					}
+					d.RetryQuery(resp)
+					continue
 				}
 
 			} else {
-				if d.QueryCount[domain+strType] <= d.MaxRetries {
+				if d.RetryCounter[domain+strType] <= d.MaxRetries {
 					d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, resp.Question[0].Qtype), d.AnsChannel)
-					d.QueryCount[domain+strType]++
+					d.RetryCounter[domain+strType]++
 					continue
 				} else {
-					QueryMutex.Lock()
-					if _, ok := rs[domain]; !ok {
-						rs[domain] = make([]string, 0)
-					}
-					QueryMutex.Unlock()
+					d.SubChannel <- []string{domain}
 				}
-			}
 
-			d.QueryCounter--
+			}
+		default:
+			continue
+			//noted d.QueryCounter--
 
 		}
+
 		// if d.QueryCounter%1 == 0 {
 		// 	fmt.Printf("\rQueryRemaining %d", d.QueryCounter)
 		// }
-		if d.QueryCounter <= 0 {
-			return rs
-		}
+
+		// if d.QueryCounter <= 0 {
+		// 	return
+		// }
 	}
+}
+
+func (d *DNSFactory) StopResolveEngine() {
+	defer d.ResolveEngineCancel()
+	defer d.ResolveEngine.Stop()
+	defer close(d.QueryPool)
+	d.QueryCounter = -1
 }
 
 func (d *DNSFactory) queryPoolGetRecord(resp *miekgdns.Msg) []string {
@@ -209,7 +208,7 @@ func (d *DNSFactory) queryPoolGetRecord(resp *miekgdns.Msg) []string {
 	return result
 }
 
-func (d *DNSFactory) GreedQuery(domain string, queryType string) []string {
+func (d *DNSFactory) GreedyQuery(domain string, queryType string) []string {
 	resultsPool := make([]string, 0)
 
 	switch queryType {
