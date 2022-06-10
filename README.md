@@ -5,11 +5,23 @@ Generally, algorithm is based on [puredns](https://github.com/d3mondev/puredns),
 
 GoWC, first it will ask for NS of target domain (Ex. ns1.<target>.com, ns2.<target>.com). Then, belong with Google & CloudFlare DNS, these NS will be used to clean wildcards faster and more accurate. Why? Because sometimes, ns1 (of target) could accept wildcard subdomains, but ns2 doesn't that lead to **False Positive**. This tool will solve all these problems.
 
+## What's new
++ With GoWC v1.3.5, wildcard subdomains will be cleared faster, and more accurate. You now can set some more options: 
+
+```
+  -s, --timeout= Timeout in seconds (default: 5)
+  -q, --qps=     Queries per second (default: 10000)
+  -r, --retries= Max retries each failed query (default: 1)
+```
+
++ All progress info just be printed to `stderr`. Only valid subdomains will be printed to `stdout`.
+
 ## Build
 
 ```
 git clone https://github.com/sting8k/gowc
-go build
+cd ./gowc/
+go build ./cmd/
 ```
 
 Or use the [pre-built binary](https://github.com/sting8k/gowc/releases)
@@ -25,17 +37,18 @@ Or use the [pre-built binary](https://github.com/sting8k/gowc/releases)
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.2
+                         GoWC v1.3.5
 Usage:
   cmd [OPTIONS]
 
 Application Options:
   -m=            Massdns output file
-  -d=            Domain of target
-  -s, --timeout= Timeout in seconds (default: 10)
+  -d, --domain=  Domain of target
+  -t, --threads= Threads (default: 20)
+  -s, --timeout= Timeout in seconds (default: 5)
   -q, --qps=     Queries per second (default: 10000)
   -r, --retries= Max retries each failed query (default: 1)
-  -o=            Output file
+  -o, --output=  Output file
   -i, --ip       Output with ips from massdns
 
 Help Options:
@@ -56,7 +69,7 @@ For output with ips of domains:
 
 # Example
 
-Cleaned `~190k` subdomains in just `~2.12s`
+Cleaned `~190k` subdomains in just `~1.72s`
 
 ```
 ./gowc -d vk.com -m vk.com_massdns.txt -o output.txt -i
@@ -67,14 +80,34 @@ Cleaned `~190k` subdomains in just `~2.12s`
 ██║   ██║██║   ██║██║███╗██║██║     
 ╚██████╔╝╚██████╔╝╚███╔███╔╝╚██████╗
  ╚═════╝  ╚═════╝  ╚══╝╚══╝  ╚═════╝
-                           GoWC v1.1
-[+] Nameserver list: ["ns1.vkontakte.ru" "ns2.vkontakte.ru" "ns3.vkontakte.ru" "ns4.vkontakte.ru" "8.8.8.8" "8.8.4.4" "1.1.1.1" "1.0.0.1"]
-[+] Processing MassDns cache file ...
-[+] 190468 subdomains to be checked
-[+] Sending 2020 queries ...
-[i] Cleaning wildcards ...
-[i] Saving output to file: test/testvk31.txt
-[!] Found 1052 valid subdomains in 2.125442671s
+                         GoWC v1.3.5
+[+] Nameserver list: 
+        + ns3.vkontakte.ru
+        + ns4.vkontakte.ru
+        + ns1.vkontakte.ru
+        + ns2.vkontakte.ru
+        + 8.8.8.8
+        + 8.8.4.4
+        + 1.1.1.1
+        + 1.0.0.1
+[+] Loaded 190468 subdomains in MassDns cache file.
+[i] Sent 1856 queries. 190450 subdomains remaining ...
+[!] Sent 2625 queries. All subdomains resolved.
+
+[+] Wildcard domains:
+        + 93.186.225.208
+        + 87.240.137.158
+        + 87.240.190.67
+        + 87.240.190.72
+        + 95.213.1.137
+        + 87.240.139.194
+        + 87.240.190.78
+        + 217.69.139.17
+        + 87.240.139.153
+[i] Crafting output ...
+[i] Saving output to file: output.txt
+
+[!] Found 1053 valid subdomains in 1.720892373s
 
 ```
 

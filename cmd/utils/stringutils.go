@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+var rp = regexp.MustCompile("[^\\s]+")
+
 func IntInSlice(a uint16, list []uint16) bool {
 	for _, b := range list {
 		if b == a {
@@ -16,7 +18,7 @@ func IntInSlice(a uint16, list []uint16) bool {
 
 func StringInSlice(a string, list []string) bool {
 	for _, b := range list {
-		if b == a {
+		if len(b) == len(a) && b == a { //list[i] == a
 			return true
 		}
 	}
@@ -24,8 +26,8 @@ func StringInSlice(a string, list []string) bool {
 }
 
 func StringInSliceWithIndex(a string, list []string) (bool, int) {
-	for i, b := range list {
-		if b == a {
+	for i := range list {
+		if list[i] == a {
 			return true, i
 		}
 	}
@@ -34,26 +36,33 @@ func StringInSliceWithIndex(a string, list []string) (bool, int) {
 
 func RemoveDuplicates(s []string) []string {
 
-	encountered := make(map[string]bool)
+	encountered := make(map[string]struct{})
 	result := make([]string, 0)
 	for _, v := range s {
 		if _, ok := encountered[v]; ok {
 			continue
 		} else {
-			encountered[v] = true
+			encountered[v] = struct{}{}
 			result = append(result, v)
 		}
 	}
 	return result
 }
 
-func RemoveIndex(s []string, index int) []string {
-	return append(s[:index], s[index+1:]...)
+func RemoveIndex(slice []string, index int) []string {
+	// return append(slice[:index], slice[index+1:]...)
+	sliceLen := len(slice)
+	sliceLastIndex := sliceLen - 1
+
+	if index != sliceLastIndex {
+		slice[index] = slice[sliceLastIndex]
+	}
+
+	return slice[:sliceLastIndex]
 }
 
 func CNAMEparse(str string) string {
-	r := regexp.MustCompile("[^\\s]+")
-	pieces := r.FindAllString(str, -1)
+	pieces := rp.FindAllString(str, -1)
 	result := pieces[len(pieces)-1]
 	result = strings.TrimSpace(strings.TrimSuffix(result, "."))
 	return result

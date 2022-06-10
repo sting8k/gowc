@@ -6,13 +6,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sting8k/gowc/cmd/model"
 	"github.com/sting8k/gowc/cmd/utils"
 )
 
-func ProcessMassdnsCache(path string, domainsQueue *[]string, IpsCache *map[string][]string) {
+func ProcessMassdnsCache(path string, gWC *model.GoWCModel) {
 	var tmpDomain, tmpIP string
-	domains, _ := utils.ReadLines(path) // x.y.z A 22.52.25.25
-	for _, domain := range domains {
+	lines, _ := utils.ReadLines(path) // x.y.z A 22.52.25.25
+	tmpMap := make(map[string][]string, 0)
+	for _, domain := range lines {
 		pieces := strings.Split(domain, " ")
 		if len(pieces) != 3 {
 			continue
@@ -22,10 +24,19 @@ func ProcessMassdnsCache(path string, domainsQueue *[]string, IpsCache *map[stri
 		}
 		tmpDomain = strings.ToLower(strings.TrimSuffix(pieces[0], "."))
 		tmpIP = strings.TrimSuffix(pieces[2], ".")
-		*domainsQueue = append(*domainsQueue, tmpDomain)
-		(*IpsCache)[tmpDomain] = append((*IpsCache)[tmpDomain], tmpIP)
+		gWC.SortedList = append(gWC.SortedList, tmpDomain)
+		tmpMap[tmpDomain] = append(tmpMap[tmpDomain], tmpIP)
 	}
-	*domainsQueue = utils.RemoveDuplicates(*domainsQueue)
+
+	gWC.SortedList = utils.RemoveDuplicates(gWC.SortedList)
+
+	sort.Slice(gWC.SortedList, func(i, j int) bool {
+		return len(strings.Split(gWC.SortedList[i], ".")) < len(strings.Split(gWC.SortedList[j], "."))
+	})
+
+	for d := range tmpMap {
+		gWC.IpsMap.Set(d, utils.RemoveDuplicates(tmpMap[d]))
+	}
 }
 
 func ExportOutput(data map[string][]string, path string, withip bool) int {

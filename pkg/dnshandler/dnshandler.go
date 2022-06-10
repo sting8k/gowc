@@ -11,12 +11,11 @@ import (
 	"github.com/caffix/resolve"
 	"github.com/miekg/dns"
 	miekgdns "github.com/miekg/dns"
-	"github.com/sirupsen/logrus"
 	"github.com/sting8k/gowc/cmd/utils"
 )
 
 type DNSFactory struct {
-	KillSwitch          bool
+	KillSwitch          chan bool
 	QueryCounter        int
 	MaxRetries          int
 	QueryDict           map[string]struct{}
@@ -35,6 +34,7 @@ type DNSFactory struct {
 type Options struct {
 	Qps           int
 	MaxRetries    int
+	Timeout       int
 	BaseResolvers []string
 }
 
@@ -42,13 +42,14 @@ var DefaultOptions = Options{
 	BaseResolvers: []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"},
 	MaxRetries:    2,
 	Qps:           10000,
+	Timeout:       5,
 }
 
 var QueryMutex = &sync.RWMutex{}
 
 func InitDNSFactory(options *Options) (*DNSFactory, error) {
 	theFactory := &DNSFactory{
-		KillSwitch:    false,
+		KillSwitch:    make(chan bool, 1),
 		BaseResolvers: options.BaseResolvers,
 		TypeMap: map[string]uint16{
 			"A":     miekgdns.TypeA,
@@ -65,7 +66,7 @@ func InitDNSFactory(options *Options) (*DNSFactory, error) {
 		RetryCounter:  make(map[string]int, 0),
 	}
 	theFactory.ResolveEngine.AddResolvers(options.Qps, theFactory.BaseResolvers...)
-	theFactory.ResolveEngine.SetTimeout(time.Duration(5) * time.Second)
+	theFactory.ResolveEngine.SetTimeout(time.Duration(options.Timeout) * time.Second)
 	theFactory.ResolveEngineCtx, theFactory.ResolveEngineCancel = context.WithCancel(context.Background())
 
 	return theFactory, nil
@@ -76,7 +77,6 @@ func (d *DNSFactory) PrepareQueryPool() {
 		for domain := range d.QueryDict {
 			d.QueryPool <- domain
 		}
-		// d.QueryDict = nil
 	}()
 }
 
@@ -91,7 +91,6 @@ func (d *DNSFactory) RetryQuery(loadedresp *miekgdns.Msg) {
 	domain := strings.ToLower(resolve.RemoveLastDot(loadedresp.Question[0].Name))
 	strType := strconv.FormatUint(uint64(loadedresp.Question[0].Qtype), 10)
 
-	logrus.Debug("Fix ...", domain)
 	if d.RetryCounter[domain+strType] <= d.MaxRetries {
 		d.RetryCounter[domain+strType]++
 		// go func(rx *miekgdns.Msg) {
@@ -99,22 +98,15 @@ func (d *DNSFactory) RetryQuery(loadedresp *miekgdns.Msg) {
 		case dns.TypeA:
 			d.QueryCounter++
 			go func(dm string) {
-				logrus.Debug("Greedy A: ", dm)
 				dX := append([]string{dm}, d.GreedyQuery(dm, "A")...)
 				d.SubChannel <- dX
-				logrus.Debug("Greedy A DONE: ", dm)
-
-				// logrus.Debug("Fixed A", dX)
 			}(domain)
 
 		case dns.TypeCNAME:
 			d.QueryCounter++
 			go func(dm string) {
-				logrus.Debug("Greedy CNAME: ", dm)
 				dX := append([]string{dm}, d.GreedyQuery(dm, "CNAME")...)
 				d.SubChannel <- dX
-				logrus.Debug("Greedy CNAME DONE: ", dm)
-				// logrus.Debug("Fixed CNAME", dX)
 			}(domain)
 		}
 	} else {
@@ -125,29 +117,21 @@ func (d *DNSFactory) RetryQuery(loadedresp *miekgdns.Msg) {
 func (d *DNSFactory) ProcessPool(sectimeout int) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
-	// defer close(d.QueryPool)
-	// defer close(d.AnsChannel)
 	lengthTimeout := time.Duration(sectimeout) * time.Second
 	timedout := time.After(lengthTimeout)
-	// rs := make(map[string][]string, 0)
-	// counter := 0
 
 	for {
 		select {
-		// case <-t.C:
-		// 	logrus.Debug("Waiting for new dns query")
-		case <-timedout:
+		case <-timedout: // do nothing
 			if len(d.AnsChannel) > 0 {
 				timedout = time.After(lengthTimeout)
-			} else {
-				if d.KillSwitch {
-					d.QueryCounter = 0
-					return
-				}
 			}
+		case <-d.KillSwitch:
+			close(d.KillSwitch)
+			return
 		case domainX := <-d.QueryPool:
 			timedout = time.After(lengthTimeout)
-			logrus.Debug("Query new domain: ", domainX)
+
 			d._ActivateQueryWithQType(domainX, "A")
 			d._ActivateQueryWithQType(domainX, "CNAME")
 		case ans := <-d.SubChannel:
@@ -171,17 +155,11 @@ func (d *DNSFactory) ProcessPool(sectimeout int) {
 				} else if resp.Rcode == miekgdns.RcodeNameError {
 					d.AnsMap <- []string{domain}
 				} else {
-					logrus.Debug("Retried: ", domain)
 					d.RetryQuery(resp)
 					continue
 				}
 
 			} else {
-				// logrus.Debug("Retried: ", domain)
-				// d.RetryQuery(resp)
-				// continue
-				// domain := strings.ToLower(resolve.RemoveLastDot(resp.Question[0].Name))
-				// strType := strconv.FormatUint(uint64(resp.Question[0].Qtype), 10)
 				if d.RetryCounter[domain+strType] <= d.MaxRetries {
 					d.ResolveEngine.Query(d.ResolveEngineCtx, resolve.QueryMsg(domain, resp.Question[0].Qtype), d.AnsChannel)
 					d.RetryCounter[domain+strType]++
@@ -191,7 +169,8 @@ func (d *DNSFactory) ProcessPool(sectimeout int) {
 				}
 
 			}
-
+		default:
+			continue
 			//noted d.QueryCounter--
 
 		}
@@ -206,9 +185,11 @@ func (d *DNSFactory) ProcessPool(sectimeout int) {
 	}
 }
 
-func (d *DNSFactory) StopPool() {
-	defer d.ResolveEngine.Stop()
+func (d *DNSFactory) StopResolveEngine() {
 	defer d.ResolveEngineCancel()
+	defer d.ResolveEngine.Stop()
+	defer close(d.QueryPool)
+	d.QueryCounter = -1
 }
 
 func (d *DNSFactory) queryPoolGetRecord(resp *miekgdns.Msg) []string {
@@ -255,7 +236,6 @@ func (d *DNSFactory) GreedyQuery(domain string, queryType string) []string {
 		}
 
 	}
-	// logrus.Debug("Greedy Done", domain, resultsPool)
 	return utils.RemoveDuplicates(resultsPool)
 
 }
